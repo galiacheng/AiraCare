@@ -23,6 +23,7 @@ class LocalVoiceService:
         self._reply_wav = reply_wav  # used only in voice.input == "file" mode
         self._tts = None
         self._asr = None
+        self._llm = None
 
     # --- lazy backends -------------------------------------------------------
     def _get_tts(self):
@@ -38,6 +39,13 @@ class LocalVoiceService:
 
             self._asr = WhisperTranscriber(model_size=self._config.voice.asr_model)
         return self._asr
+
+    def _get_llm(self):
+        if self._llm is None:
+            from airacare_edge.voice.llm import OllamaInterpreter
+
+            self._llm = OllamaInterpreter(model=self._config.voice.llm_model)
+        return self._llm
 
     # --- VoiceService protocol ----------------------------------------------
     def say(self, text: str) -> None:
@@ -65,5 +73,10 @@ class LocalVoiceService:
         return text or None
 
     def interpret(self, transcript: str) -> ReplyIntent:
-        # Step 4: keyword fast-path only. Step 5 adds Ollama for 'unclear' replies.
-        return keyword_intent(transcript)
+        # Keyword fast-path first; only ambiguous replies wake the LLM (step 5).
+        base = keyword_intent(transcript)
+        if base.status == "unclear" and self._config.voice.use_llm_for_ambiguous:
+            llm_intent = self._get_llm().interpret(transcript)
+            if llm_intent is not None and llm_intent.status in ("ok", "distress"):
+                return llm_intent
+        return base

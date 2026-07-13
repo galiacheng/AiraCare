@@ -6,23 +6,27 @@ scenario: **Nighttime Wandering**. Design: [../spec/edge-design.md](../spec/edge
 > **Privacy boundary:** raw audio never leaves the device — only a structured
 > `DailyLivingEvent` is sent to the cloud.
 
-## Status — build steps 1–4
+## Status — build steps 1–5
 
 Implemented so far:
 
 - **Step 1** — pure-logic core: `cloud/contracts.py`, `sensors/`, `reasoning/`,
   `agent.py` (Edge Core FSM + `VoiceService`/`CloudClient`/`AlertSink` protocols),
   in-process grading stub, unit tests.
-- **Step 2** — `cli.py`: interactive scenario runner driving the full
-  Edge → Cloud → Edge loop with a printed privacy-boundary panel.
-- **Step 3** — A2A network path: `cloud/a2a_stub.py` (Foundry stand-in server) +
-  `cloud/a2a_client.py` (JSON-RPC/A2A client) + `cloud/factory.py`.
+- **Step 2** — `cli.py`: interactive scenario runner with a printed privacy panel.
+- **Step 3** — A2A network path: `cloud/a2a_stub.py` + `cloud/a2a_client.py` +
+  `cloud/factory.py` (drop-in for the real Foundry Hosted Agent).
 - **Step 4** — real voice I/O behind `VoiceService` (`voice/`): SAPI TTS (`say`),
-  mic → energy-VAD → faster-whisper (`listen`), keyword `interpret` (rule path).
-  All audio imports are lazy; `[audio]` extra required only to run it.
+  mic → energy-VAD → faster-whisper (`listen`), keyword `interpret`.
+- **Step 5** — `voice/llm.py` Ollama reply-understanding for *ambiguous* replies
+  (keyword fast-path first; LLM only on `unclear`; safe fallback if Ollama is absent)
+  + bounded **clarify loop** in the FSM (`max_clarify_retries`, default 1).
 
-Coming next: **step 5** — Ollama reply understanding for `unclear` replies + the
-1-retry clarify loop; **step 6** — privacy scrub + split-screen UI.
+Coming next: **step 6** — privacy scrub + split-screen UI panel.
+
+> **Ollama is optional.** The LLM enhances only ambiguous replies. If Ollama isn't
+> running, the edge keeps the keyword result and the clarify loop / escalation handles
+> it. To enable it: install Ollama, `ollama pull phi3.5`, and `pip install -e ".[llm]"`.
 
 ## Quickstart (dev)
 

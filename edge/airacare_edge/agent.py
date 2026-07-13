@@ -94,10 +94,8 @@ class EdgeAgent:
         if candidate is None or candidate.confidence < self._config.thresholds.wander_confidence:
             return FlowResult(handled=False, path="below_threshold", event=candidate)
 
-        # Active voice confirmation (L1 first response, on the edge).
-        self._voice.say(self._confirm_prompt())
-        transcript = self._voice.listen(self._config.thresholds.no_response_seconds)
-        intent = self._resolve_intent(transcript)
+        # Active voice confirmation with a bounded clarify loop (L1 first response).
+        intent = self._active_confirm()
 
         decision = self._escalation.decide(intent, prompted=True)
         event = candidate.model_copy(
@@ -129,6 +127,24 @@ class EdgeAgent:
             return ReplyIntent(status="no_response", urgency=0.9, transcript=None)
         return self._voice.interpret(transcript)
 
+    def _active_confirm(self) -> ReplyIntent:
+        """Ask 'are you okay?', understand the reply, and re-ask on 'unclear'.
+
+        Bounded by ``voice.max_clarify_retries`` — never loops indefinitely. Silence or
+        distress on any attempt returns immediately (both escalate).
+        """
+        timeout = self._config.thresholds.no_response_seconds
+        max_retries = self._config.voice.max_clarify_retries
+        prompt = self._confirm_prompt()
+        attempt = 0
+        while True:
+            self._voice.say(prompt)
+            intent = self._resolve_intent(self._voice.listen(timeout))
+            if intent.status != "unclear" or attempt >= max_retries:
+                return intent
+            attempt += 1
+            prompt = self._clarify_prompt()
+
     def _offline_fallback(self, event: DailyLivingEvent, intent: ReplyIntent) -> FlowResult:
         # Escalate the edge action to a local alert since the cloud is unreachable.
         offline_event = event.model_copy(update={"edge_action_taken": "local_alert"})
@@ -146,3 +162,6 @@ class EdgeAgent:
 
     def _confirm_prompt(self) -> str:
         return f"{self._config.patient.name}, are you okay?"
+
+    def _clarify_prompt(self) -> str:
+        return "I didn't catch that. Are you okay?"
