@@ -28,6 +28,10 @@ class WhisperTranscriber:
             )
         return self._model
 
+    def ensure_loaded(self) -> None:
+        """Pre-load the model into memory (used for warm-up)."""
+        self._ensure_model()
+
     def transcribe_file(self, wav_path: str | Path) -> str:
         model = self._ensure_model()
         segments, _ = model.transcribe(str(wav_path), language="en")

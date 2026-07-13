@@ -80,3 +80,15 @@ class LocalVoiceService:
             if llm_intent is not None and llm_intent.status in ("ok", "distress"):
                 return llm_intent
         return base
+
+    def warm_up(self) -> dict[str, bool]:
+        """Pre-load ASR (and the LLM if enabled) so the live demo has no cold start."""
+        status: dict[str, bool] = {}
+        try:
+            self._get_asr().ensure_loaded()
+            status["asr"] = True
+        except Exception:  # noqa: BLE001
+            status["asr"] = False
+        if self._config.voice.use_llm_for_ambiguous:
+            status["llm"] = self._get_llm().warm_up()
+        return status

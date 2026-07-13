@@ -65,6 +65,8 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
         from airacare_edge.voice.service import LocalVoiceService
 
         voice = LocalVoiceService(config, reply_wav=reply_wav)
+        print("  ⏳ warming up local models…")
+        print(f"     warm-up: {voice.warm_up()}")
     else:
         voice = ConsoleVoice(scripted_reply=reply)
 

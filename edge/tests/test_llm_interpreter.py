@@ -48,3 +48,13 @@ def test_interpreter_bad_status_returns_none(monkeypatch):
 def test_interpreter_error_returns_none(monkeypatch):
     monkeypatch.setitem(sys.modules, "ollama", _fake_ollama(raises=True))
     assert OllamaInterpreter().interpret("blah") is None
+
+
+def test_warm_up_true(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ollama", _fake_ollama('{"status":"ok"}'))
+    assert OllamaInterpreter().warm_up() is True
+
+
+def test_warm_up_false_on_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ollama", _fake_ollama(raises=True))
+    assert OllamaInterpreter().warm_up() is False

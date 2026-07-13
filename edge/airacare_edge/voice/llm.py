@@ -26,6 +26,20 @@ class OllamaInterpreter:
     def __init__(self, model: str = "phi3.5") -> None:
         self._model = model
 
+    def warm_up(self) -> bool:
+        """Load the model into memory so the first real call isn't a cold start."""
+        try:
+            import ollama  # lazy
+
+            ollama.chat(
+                model=self._model,
+                messages=[{"role": "user", "content": "ready"}],
+                options={"num_predict": 1},
+            )
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def interpret(self, transcript: str) -> ReplyIntent | None:
         try:
             import ollama  # lazy

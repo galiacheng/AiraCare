@@ -1,30 +1,42 @@
-"""Manual live-mic smoke test — speak after the prompt and see the transcription.
+"""Manual live-mic smoke test — exercises the FULL voice path incl. the LLM.
 
     python -m airacare_edge.voice.mic_check
 
-Records one utterance from the (Remote Audio) mic, transcribes it, and prints the
-keyword intent. Requires the ``[audio]`` extra.
+Warms up the models, records one utterance from the (Remote Audio) mic, transcribes it,
+and interprets it via the keyword fast-path → Ollama (on ambiguous replies). Say
+something clear ("I'm fine" / "help me") or deliberately ambiguous
+("no need to fuss over me") to see the LLM engage. Requires the ``[audio]`` extra
+(and Ollama running for the LLM step).
 """
 
 from __future__ import annotations
 
-from airacare_edge.voice.asr import WhisperTranscriber
-from airacare_edge.voice.nlu import keyword_intent
-from airacare_edge.voice.vad import record_until_silence
+from pathlib import Path
+
+from airacare_edge.config import EdgeConfig
+from airacare_edge.voice.service import LocalVoiceService
 
 
 def main() -> None:
-    sample_rate = 16000
-    print("🎙️  Speak now (say e.g. 'I'm fine' or 'help me')… waiting up to 8s.")
-    samples = record_until_silence(sample_rate=sample_rate, start_timeout=8.0)
-    if samples is None:
-        print("… no speech detected (this would be treated as NO RESPONSE → escalate).")
+    config_path = Path(__file__).resolve().parents[2] / "config.yaml"
+    config = EdgeConfig.load(config_path)
+    # Force live mic for this check regardless of config.
+    config = config.model_copy(
+        update={"voice": config.voice.model_copy(update={"input": "mic"})}
+    )
+    service = LocalVoiceService(config)
+
+    print("⏳ warming up models (whisper + phi3.5)…")
+    print(f"   warm-up: {service.warm_up()}")
+
+    print("🎙️  Speak now (clear: 'I'm fine' / 'help me'; ambiguous: 'no need to fuss')… up to 8s.")
+    transcript = service.listen(config.thresholds.no_response_seconds)
+    if transcript is None:
+        print("… no speech detected (→ NO RESPONSE → would escalate).")
         return
 
-    print("📝 transcribing…")
-    text = WhisperTranscriber(model_size="base").transcribe_array(samples, sample_rate)
-    intent = keyword_intent(text)
-    print(f'   transcript: "{text}"')
+    intent = service.interpret(transcript)
+    print(f'   transcript: "{transcript}"')
     print(f"   intent:     status={intent.status} urgency={intent.urgency:.2f}")
 
 
