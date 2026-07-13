@@ -36,8 +36,18 @@ def main() -> None:
         return
 
     intent = service.interpret(transcript)
+    prov = service.last_interpretation or {}
     print(f'   transcript: "{transcript}"')
-    print(f"   intent:     status={intent.status} urgency={intent.urgency:.2f}")
+    print(f"   keyword fast-path said: {prov.get('keyword')}")
+    if prov.get("llm_used"):
+        llm_result = prov.get("llm_result")
+        if llm_result in ("ok", "distress"):
+            print(f"   → 'unclear' → 🧠 LLM re-interpreted it as: {llm_result}")
+        else:
+            print(f"   → 'unclear' → 🧠 LLM consulted (result={llm_result}); kept 'unclear'")
+    else:
+        print("   → resolved by keyword fast-path (LLM NOT called)")
+    print(f"   FINAL intent: status={intent.status} urgency={intent.urgency:.2f}")
 
 
 if __name__ == "__main__":

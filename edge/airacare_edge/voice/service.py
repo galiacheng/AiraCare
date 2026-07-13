@@ -24,6 +24,8 @@ class LocalVoiceService:
         self._tts = None
         self._asr = None
         self._llm = None
+        # Provenance of the most recent interpret() call (for demo/UI transparency).
+        self.last_interpretation: dict[str, object] | None = None
 
     # --- lazy backends -------------------------------------------------------
     def _get_tts(self):
@@ -75,11 +77,24 @@ class LocalVoiceService:
     def interpret(self, transcript: str) -> ReplyIntent:
         # Keyword fast-path first; only ambiguous replies wake the LLM (step 5).
         base = keyword_intent(transcript)
+        final = base
+        llm_used = False
+        llm_result: str | None = None
+
         if base.status == "unclear" and self._config.voice.use_llm_for_ambiguous:
+            llm_used = True
             llm_intent = self._get_llm().interpret(transcript)
+            llm_result = llm_intent.status if llm_intent is not None else None
             if llm_intent is not None and llm_intent.status in ("ok", "distress"):
-                return llm_intent
-        return base
+                final = llm_intent
+
+        self.last_interpretation = {
+            "keyword": base.status,
+            "llm_used": llm_used,
+            "llm_result": llm_result,
+            "final": final.status,
+        }
+        return final
 
     def warm_up(self) -> dict[str, bool]:
         """Pre-load ASR (and the LLM if enabled) so the live demo has no cold start."""
