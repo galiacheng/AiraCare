@@ -22,6 +22,7 @@ voice:
   tts_voice: en_US-medium        # Piper voice
   llm_model: phi3.5              # Ollama model for reply understanding
   use_llm_for_ambiguous: true    # keyword fast-path first; LLM only for ambiguous replies
+  max_clarify_retries: 1         # on 'unclear', re-ask once then escalate (never loop)
 
 # Cloud target
 cloud:

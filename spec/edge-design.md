@@ -130,9 +130,13 @@ with no mic, no Ollama, no network.
 patient: { id: p-001, name: "Grandpa Zhang", disease_stage: moderate }
 quiet_hours: { start: "22:00", end: "07:00" }
 thresholds: { wander_confidence: 0.7, no_response_seconds: 8, correlation_window_seconds: 120 }
-voice: { input: file, asr_model: small, tts_voice: en_US-medium, llm_model: phi3.5, use_llm_for_ambiguous: true }
+voice: { input: file, asr_model: small, tts_voice: en_US-medium, llm_model: phi3.5, use_llm_for_ambiguous: true, max_clarify_retries: 1 }
 cloud: { mode: stub, a2a_endpoint: "http://localhost:8971/a2a" }
 ```
+
+> `max_clarify_retries: 1` — on an `unclear` reply the agent re-asks **once**, then
+> escalates. Never loops indefinitely: for an Alzheimer's patient, prolonged silence or
+> confusion is itself a risk signal, so the safe default is *ask once more, then escalate*.
 
 ## 8. Build order
 
@@ -151,3 +155,48 @@ cloud: { mode: stub, a2a_endpoint: "http://localhost:8971/a2a" }
 - LLM output constrained to tiny JSON (`{status, urgency}`) to minimize latency.
 - `no_response_seconds` is configurable (default a touch generous) to stay robust over
   Remote Audio buffering.
+
+## 10. Voice pipeline — roles & actors (step 4–5)
+
+The active-confirm dialogue is a spoken exchange between **two actors**: the **AiraCare
+edge agent** and the **patient**. The agent's side is its *mouth* (speak) and its
+*brain* (understand); the patient's spoken response is perceived through the agent's
+*ear → attention → transcriber*. **Silence is a valid reply** — treated as
+`no_response` and escalated.
+
+```
+Piper speaks prompt → mic records → silero-VAD (speech? / silence-timeout?)
+                    → faster-whisper transcribes → Ollama interprets meaning
+```
+
+| # | Step | Component | Actor / role | Input → Output |
+|---|---|---|---|---|
+| 1 | Piper speaks prompt | Piper TTS | 🗣️ **Agent — mouth**: voices the prompt aloud | text → speaker audio |
+| 2 | Mic records | mic + `sounddevice` (Remote Audio) | 👂 **Agent — ear (capture)**: records the patient (or silence) | sound → raw audio (stays on device) |
+| 3 | silero-VAD | silero-VAD | 🎯 **Agent — attention / turn-taking**: is anyone speaking? when did they stop? fires the **no-response timeout** | audio frames → speech/no-speech + silence-timeout |
+| 4 | faster-whisper transcribes | faster-whisper ASR | ✍️ **Agent — transcriber**: speech → words | speech audio → transcript text |
+| 5 | Ollama interprets meaning | Phi-3.5-mini via Ollama | 🧠 **Agent — comprehension**: what did the reply mean? | transcript → `ReplyIntent{status, urgency}` |
+| — | (responds by voice or stays silent) | — | 🧑‍🦳 **Patient — the second speaker**: the response steps 2–4 perceive | speech / silence |
+
+**Mapping to the `VoiceService` protocol** (the Edge Core FSM is unchanged — these steps
+live entirely behind the protocol):
+
+| `VoiceService` method | Pipeline steps | Returns |
+|---|---|---|
+| `say(text)` | 1 (Piper) | — |
+| `listen(timeout)` | 2 + 3 + 4 (mic → VAD → whisper) | transcript, or **`None`** on silence-timeout |
+| `interpret(transcript)` | 5 (keyword fast-path → Ollama) | `ReplyIntent` |
+
+**Safety vs. enhancement:**
+- Step **3 (VAD silence-timeout)** is on the *safety path* — "no response → escalate" —
+  so it is rule-based and must be robust.
+- Step **5 (Ollama)** is *not* on the classification path; it only interprets what was
+  said, with a **keyword fast-path** in front ("help"/"fine" resolve instantly).
+
+**Bounded clarify loop (`max_clarify_retries: 1`):** if step 5 returns `unclear`, the
+agent re-asks **once** ("I didn't catch that — are you okay?") then escalates. It never
+loops indefinitely.
+
+**Privacy:** raw audio exists only inside steps 2–4 and is discarded after
+transcription. Only `ReplyIntent.status` flows into `DailyLivingEvent.context.response`
+— **no audio ever crosses to the cloud.**

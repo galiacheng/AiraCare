@@ -32,6 +32,7 @@ class VoiceConfig(BaseModel):
     tts_voice: str = "en_US-medium"
     llm_model: str = "phi3.5"
     use_llm_for_ambiguous: bool = True
+    max_clarify_retries: int = 1  # re-ask once on 'unclear', then escalate
 
 
 class CloudConfig(BaseModel):
