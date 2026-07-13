@@ -1,0 +1,47 @@
+[project]
+name = "airacare-edge"
+version = "0.1.0"
+description = "AiraCare edge agent — privacy-first in-home Alzheimer's care (flagship: Nighttime Wandering)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Real-time voice stack (step 4+). Kept out of the core install so step 1 stays light.
+audio = [
+    "faster-whisper>=1.0",
+    "sounddevice>=0.4",
+    "numpy>=1.26",
+    "silero-vad>=5.1",
+    "piper-tts>=1.2",
+]
+# Local LLM reply understanding (step 5).
+llm = [
+    "ollama>=0.3",
+]
+# A2A client to the stub / Foundry (step 3+).
+cloud = [
+    "httpx>=0.27",
+    "agent-framework>=0.1",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["airacare_edge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

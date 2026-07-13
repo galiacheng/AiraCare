@@ -1,0 +1,29 @@
+# Patient profile (drives personalized prompts + cloud disease-stage reasoning)
+patient:
+  id: p-001
+  name: Grandpa Zhang
+  disease_stage: moderate      # mild | moderate | severe
+
+# Nighttime window — out-of-bed + door events here are anomalous
+quiet_hours:
+  start: "22:00"
+  end: "07:00"
+
+# Edge decision thresholds
+thresholds:
+  wander_confidence: 0.7         # min confidence to trigger active voice confirm
+  no_response_seconds: 8         # VAD no-response timeout (a touch generous over Remote Audio)
+  correlation_window_seconds: 120  # window to correlate out-of-bed + door-open
+
+# Voice pipeline (models used in step 4+)
+voice:
+  input: file                    # file (deterministic dev) | mic (Remote Audio demo)
+  asr_model: small               # faster-whisper size
+  tts_voice: en_US-medium        # Piper voice
+  llm_model: phi3.5              # Ollama model for reply understanding
+  use_llm_for_ambiguous: true    # keyword fast-path first; LLM only for ambiguous replies
+
+# Cloud target
+cloud:
+  mode: stub                     # stub (local grading) | foundry (real Hosted Agent)
+  a2a_endpoint: "http://localhost:8971/a2a"
