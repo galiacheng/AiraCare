@@ -18,6 +18,7 @@ from airacare_edge.config import EdgeConfig
 from airacare_edge.reasoning.baseline import BaselineTracker
 from airacare_edge.reasoning.classifier import WanderClassifier
 from airacare_edge.sensors.simulator import nighttime_wander_events
+from airacare_edge.voice.nlu import keyword_intent
 
 
 class ConsoleVoice(VoiceService):
@@ -37,12 +38,7 @@ class ConsoleVoice(VoiceService):
         return self._scripted_reply
 
     def interpret(self, transcript: str) -> ReplyIntent:
-        text = transcript.lower()
-        if any(word in text for word in ("help", "fell", "can't", "hurt")):
-            return ReplyIntent(status="distress", urgency=0.95, transcript=transcript)
-        if any(word in text for word in ("fine", "ok", "okay", "good")):
-            return ReplyIntent(status="ok", urgency=0.1, transcript=transcript)
-        return ReplyIntent(status="unclear", urgency=0.5, transcript=transcript)
+        return keyword_intent(transcript)
 
 
 class ConsoleAlerts(AlertSink):

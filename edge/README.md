@@ -6,9 +6,9 @@ scenario: **Nighttime Wandering**. Design: [../spec/edge-design.md](../spec/edge
 > **Privacy boundary:** raw audio never leaves the device — only a structured
 > `DailyLivingEvent` is sent to the cloud.
 
-## Status — build steps 1–3
+## Status — build steps 1–4
 
-Implemented so far (no ML models / mic required):
+Implemented so far:
 
 - **Step 1** — pure-logic core: `cloud/contracts.py`, `sensors/`, `reasoning/`,
   `agent.py` (Edge Core FSM + `VoiceService`/`CloudClient`/`AlertSink` protocols),
@@ -16,11 +16,13 @@ Implemented so far (no ML models / mic required):
 - **Step 2** — `cli.py`: interactive scenario runner driving the full
   Edge → Cloud → Edge loop with a printed privacy-boundary panel.
 - **Step 3** — A2A network path: `cloud/a2a_stub.py` (Foundry stand-in server) +
-  `cloud/a2a_client.py` (JSON-RPC/A2A client) + `cloud/factory.py`. Drop-in for the
-  real Foundry Hosted Agent by switching `cloud.mode` / endpoint.
+  `cloud/a2a_client.py` (JSON-RPC/A2A client) + `cloud/factory.py`.
+- **Step 4** — real voice I/O behind `VoiceService` (`voice/`): SAPI TTS (`say`),
+  mic → energy-VAD → faster-whisper (`listen`), keyword `interpret` (rule path).
+  All audio imports are lazy; `[audio]` extra required only to run it.
 
-Coming next: voice pipeline (step 4–5: Piper TTS, faster-whisper ASR, silero-VAD,
-Ollama reply understanding), privacy scrub + split-screen UI (step 6).
+Coming next: **step 5** — Ollama reply understanding for `unclear` replies + the
+1-retry clarify loop; **step 6** — privacy scrub + split-screen UI.
 
 ## Quickstart (dev)
 
@@ -28,36 +30,34 @@ Ollama reply understanding), privacy scrub + split-screen UI (step 6).
 cd edge
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-pytest -q
+pip install -e ".[dev]"            # core + tests (no audio)
+pytest -q -m "not slow"            # fast suite
+
+# to run the real voice pipeline:
+pip install -e ".[dev,audio]"
+pytest -q                          # includes the TTS->ASR round-trip
 ```
 
-Scripted one-shot demo (in-process stub, no mic/LLM):
+Scenario runner (fake console voice):
 
 ```powershell
-python -m airacare_edge.main
-```
-
-Interactive scenario runner (step 2):
-
-```powershell
-python -m airacare_edge.cli --scenario no-response      # -> L3 escalation
+python -m airacare_edge.cli --scenario no-response      # -> L3
 python -m airacare_edge.cli --scenario reply-ok         # -> L1 voice loop-back
-python -m airacare_edge.cli --scenario distress         # -> L3
-python -m airacare_edge.cli --scenario restless         # -> below threshold (L0)
 ```
 
-Run over the A2A network path (step 3) — start the stub server, then point the CLI at it:
+Real voice (step 4) — live mic check, and the full loop with local TTS/ASR:
 
 ```powershell
-# terminal 1 — Foundry stand-in
-python -m airacare_edge.cloud.a2a_stub --port 8971
+python -m airacare_edge.voice.mic_check                 # speak; see transcript + intent
+python -m airacare_edge.cli --scenario reply-ok --voice local   # config voice.input=mic for live mic
+```
 
-# terminal 2 — edge talks to it over HTTP (drop-in for real Foundry)
+A2A network path (step 3) — start the stub, then point the CLI at it:
+
+```powershell
+python -m airacare_edge.cloud.a2a_stub --port 8971
 python -m airacare_edge.cli --scenario no-response --cloud a2a --endpoint http://127.0.0.1:8971/a2a
 ```
-
-(Run `--cloud a2a` *without* starting the server to see the offline fallback beat.)
 
 ## Layout
 

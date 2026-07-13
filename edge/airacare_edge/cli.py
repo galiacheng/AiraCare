@@ -56,21 +56,28 @@ def _load_config(path: str | None, cloud_mode: str, endpoint: str | None) -> Edg
     return config.model_copy(update={"cloud": cloud})
 
 
-def run(scenario: str, config: EdgeConfig) -> None:
+def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply_wav: str | None = None) -> None:
     reply, sensor_factory = SCENARIOS[scenario]
     baseline = BaselineTracker(config.quiet_hours)
     classifier = WanderClassifier(baseline, config.thresholds.correlation_window_seconds)
 
+    if voice_mode == "local":
+        from airacare_edge.voice.service import LocalVoiceService
+
+        voice = LocalVoiceService(config, reply_wav=reply_wav)
+    else:
+        voice = ConsoleVoice(scripted_reply=reply)
+
     agent = EdgeAgent(
         config=config,
-        voice=ConsoleVoice(scripted_reply=reply),
+        voice=voice,
         cloud=make_cloud_client(config),
         alerts=ConsoleAlerts(),
         classifier=classifier,
         clock=lambda: NIGHT,
     )
 
-    print(f"\n=== AiraCare edge — scenario '{scenario}' (cloud={config.cloud.mode}) ===")
+    print(f"\n=== AiraCare edge — scenario '{scenario}' (cloud={config.cloud.mode}, voice={voice_mode}) ===")
     events = sensor_factory(at=NIGHT)
     print(f"  🛰️ sensors: {[e.kind for e in events]} @ {NIGHT.isoformat()}")
 
@@ -99,12 +106,19 @@ def main() -> None:
         default="inproc",
         help="inproc = in-process stub; a2a = local stub server; foundry = real hosted agent",
     )
+    parser.add_argument(
+        "--voice",
+        choices=["console", "local"],
+        default="console",
+        help="console = printed fake voice; local = real TTS + mic/file ASR (needs .[audio])",
+    )
+    parser.add_argument("--reply-wav", default=None, help="WAV file to transcribe in voice.input=file mode")
     parser.add_argument("--endpoint", default=None, help="override the A2A endpoint URL")
     parser.add_argument("--config", default=None, help="path to config.yaml")
     args = parser.parse_args()
 
     config = _load_config(args.config, args.cloud, args.endpoint)
-    run(args.scenario, config)
+    run(args.scenario, config, voice_mode=args.voice, reply_wav=args.reply_wav)
 
 
 if __name__ == "__main__":

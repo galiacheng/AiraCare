@@ -10,13 +10,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Real-time voice stack (step 4+). Kept out of the core install so step 1 stays light.
+# Real-time voice stack (step 4+). Lightweight, CPU-friendly, no torch:
+#   pyttsx3      -> offline SAPI TTS (no model download on Windows)
+#   faster-whisper -> CPU ASR (int8), auto-downloads the model on first use
+#   sounddevice  -> mic capture / playback (bundles PortAudio on Windows)
+#   numpy        -> energy-based VAD
 audio = [
     "faster-whisper>=1.0",
     "sounddevice>=0.4",
     "numpy>=1.26",
-    "silero-vad>=5.1",
+    "pyttsx3>=2.90",
+]
+# Optional higher-fidelity neural backends (larger install; pull extra runtimes).
+audio-neural = [
     "piper-tts>=1.2",
+    "silero-vad>=5.1",
 ]
 # Local LLM reply understanding (step 5).
 llm = [
@@ -41,6 +49,9 @@ packages = ["airacare_edge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: tests that load ML models / audio backends (deselect with -m 'not slow')",
+]
 
 [tool.ruff]
 line-length = 100

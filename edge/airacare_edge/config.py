@@ -29,10 +29,14 @@ class Thresholds(BaseModel):
 class VoiceConfig(BaseModel):
     input: Literal["mic", "file"] = "file"
     asr_model: str = "small"
+    tts_engine: Literal["sapi", "piper"] = "sapi"
     tts_voice: str = "en_US-medium"
     llm_model: str = "phi3.5"
     use_llm_for_ambiguous: bool = True
     max_clarify_retries: int = 1  # re-ask once on 'unclear', then escalate
+    sample_rate: int = 16000
+    silence_seconds: float = 1.2  # trailing silence that ends an utterance
+    energy_threshold: float = 0.02  # RMS threshold for the energy VAD
 
 
 class CloudConfig(BaseModel):
