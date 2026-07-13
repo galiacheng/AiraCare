@@ -21,8 +21,11 @@ Implemented so far:
 - **Step 5** — `voice/llm.py` Ollama reply-understanding for *ambiguous* replies
   (keyword fast-path first; LLM only on `unclear`; safe fallback if Ollama is absent)
   + bounded **clarify loop** in the FSM (`max_clarify_retries`, default 1).
+- **Step 6** — `privacy/scrub.py` (raw audio → non-reconstructable features) +
+  `ui/panel.py` **split-screen demo panel** (EDGE vs FOUNDRY, with the "only the
+  DailyLivingEvent crossed" privacy boundary). Run with `--panel`.
 
-Coming next: **step 6** — privacy scrub + split-screen UI panel.
+The edge is **feature-complete for the flagship flow**.
 
 > **Ollama is optional.** The LLM enhances only ambiguous replies. If Ollama isn't
 > running, the edge keeps the keyword result and the clarify loop / escalation handles
@@ -47,6 +50,7 @@ Scenario runner (fake console voice):
 ```powershell
 python -m airacare_edge.cli --scenario no-response      # -> L3
 python -m airacare_edge.cli --scenario reply-ok         # -> L1 voice loop-back
+python -m airacare_edge.cli --scenario no-response --panel   # split-screen demo panel
 ```
 
 Real voice (step 4) — live mic check, and the full loop with local TTS/ASR:

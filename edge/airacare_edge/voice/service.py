@@ -26,6 +26,8 @@ class LocalVoiceService:
         self._llm = None
         # Provenance of the most recent interpret() call (for demo/UI transparency).
         self.last_interpretation: dict[str, object] | None = None
+        # Privacy-scrubbed features from the most recent captured utterance (mic path).
+        self.last_features: list[float] | None = None
 
     # --- lazy backends -------------------------------------------------------
     def _get_tts(self):
@@ -70,7 +72,12 @@ class LocalVoiceService:
             energy_threshold=voice.energy_threshold,
         )
         if samples is None:
+            self.last_features = None
             return None
+        # Privacy scrub: derive non-reconstructable features, then discard raw audio.
+        from airacare_edge.privacy.scrub import scrub_audio_features
+
+        self.last_features = scrub_audio_features(samples, voice.sample_rate)
         text = self._get_asr().transcribe_array(samples, voice.sample_rate)
         return text or None
 
