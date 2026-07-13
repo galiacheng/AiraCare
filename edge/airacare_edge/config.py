@@ -35,7 +35,7 @@ class VoiceConfig(BaseModel):
 
 
 class CloudConfig(BaseModel):
-    mode: Literal["stub", "foundry"] = "stub"
+    mode: Literal["stub", "a2a", "foundry"] = "stub"
     a2a_endpoint: str = "http://localhost:8971/a2a"
 
 
