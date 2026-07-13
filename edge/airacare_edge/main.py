@@ -88,6 +88,9 @@ def _run(config: EdgeConfig) -> None:
 def main() -> None:
     from pathlib import Path
 
+    from airacare_edge._console import ensure_utf8_stdout
+
+    ensure_utf8_stdout()
     config_path = Path(__file__).resolve().parents[1] / "config.yaml"
     _run(EdgeConfig.load(config_path))
 

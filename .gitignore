@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# AiraCare edge — local offline store-and-forward queue (runtime state)
+.airacare_queue/
+edge/.airacare_queue/
+
 # C extensions
 *.so
 

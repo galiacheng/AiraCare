@@ -42,6 +42,8 @@ class VoiceConfig(BaseModel):
 class CloudConfig(BaseModel):
     mode: Literal["stub", "a2a", "foundry"] = "stub"
     a2a_endpoint: str = "http://localhost:8971/a2a"
+    offline_queue_dir: str = ".airacare_queue"  # local store-and-forward directory
+    offline_ttl_seconds: float = 3600.0  # drop queued events older than this (default 1h)
 
 
 class EdgeConfig(BaseModel):

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Callable, Protocol, runtime_checkable
 
 from airacare_edge.cloud.contracts import (
     CloudDecision,
@@ -26,6 +26,9 @@ from airacare_edge.config import EdgeConfig
 from airacare_edge.reasoning.classifier import WanderClassifier
 from airacare_edge.reasoning.escalation import EscalationPolicy
 from airacare_edge.sensors.events import RawSensorEvent
+
+if TYPE_CHECKING:
+    from airacare_edge.cloud.queue import FlushResult, OfflineQueue
 
 
 @runtime_checkable
@@ -78,6 +81,7 @@ class EdgeAgent:
         classifier: WanderClassifier,
         escalation: EscalationPolicy | None = None,
         clock: Callable[[], datetime] = utcnow,
+        queue: "OfflineQueue | None" = None,
     ) -> None:
         self._config = config
         self._voice = voice
@@ -86,6 +90,13 @@ class EdgeAgent:
         self._classifier = classifier
         self._escalation = escalation or EscalationPolicy()
         self._clock = clock
+        self._queue = queue
+
+    def flush_offline_queue(self, now: datetime | None = None) -> "FlushResult | None":
+        """Re-send any locally-persisted events (call when connectivity may be restored)."""
+        if self._queue is None:
+            return None
+        return self._queue.flush(self._cloud, now=now or self._clock())
 
     def handle_sensor_events(self, events: list[RawSensorEvent]) -> FlowResult:
         now = self._clock()
@@ -151,6 +162,9 @@ class EdgeAgent:
         reason = "offline: cloud unreachable"
         self._alerts.local_alert(offline_event, reason)
         self._alerts.notify_kin_sms(offline_event, reason)
+        # Persist for store-and-forward: re-sent to the cloud once connectivity returns.
+        if self._queue is not None:
+            self._queue.enqueue(offline_event, now=self._clock())
         return FlowResult(
             handled=True,
             path="offline_fallback",

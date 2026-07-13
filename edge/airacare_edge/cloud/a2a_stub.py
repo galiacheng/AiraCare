@@ -90,6 +90,9 @@ class A2AStubServer:
 def main() -> None:
     import argparse
 
+    from airacare_edge._console import ensure_utf8_stdout
+
+    ensure_utf8_stdout()
     parser = argparse.ArgumentParser(description="AiraCare A2A stub (Foundry stand-in)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8971)

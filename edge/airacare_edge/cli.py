@@ -23,6 +23,7 @@ from pathlib import Path
 
 from airacare_edge.agent import EdgeAgent
 from airacare_edge.cloud.factory import make_cloud_client
+from airacare_edge.cloud.queue import OfflineQueue
 from airacare_edge.config import EdgeConfig
 from airacare_edge.main import ConsoleAlerts, ConsoleVoice
 from airacare_edge.reasoning.baseline import BaselineTracker
@@ -77,7 +78,16 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
         alerts=ConsoleAlerts(),
         classifier=classifier,
         clock=lambda: NIGHT,
+        queue=OfflineQueue(config.cloud.offline_queue_dir, ttl_seconds=config.cloud.offline_ttl_seconds),
     )
+
+    # Store-and-forward: on (re)connect, drain any locally-persisted offline events.
+    flush = agent.flush_offline_queue()
+    if flush and (flush.sent_count or flush.expired):
+        print(
+            f"  🔁 re-synced {flush.sent_count} queued event(s) to cloud "
+            f"({flush.expired} expired, {flush.remaining} remaining)"
+        )
 
     events = sensor_factory(at=NIGHT)
     result = agent.handle_sensor_events(events)
@@ -111,6 +121,9 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
 
 
 def main() -> None:
+    from airacare_edge._console import ensure_utf8_stdout
+
+    ensure_utf8_stdout()
     parser = argparse.ArgumentParser(description="AiraCare edge scenario runner")
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="no-response")
     parser.add_argument(

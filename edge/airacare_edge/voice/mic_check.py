@@ -18,6 +18,9 @@ from airacare_edge.voice.service import LocalVoiceService
 
 
 def main() -> None:
+    from airacare_edge._console import ensure_utf8_stdout
+
+    ensure_utf8_stdout()
     config_path = Path(__file__).resolve().parents[2] / "config.yaml"
     config = EdgeConfig.load(config_path)
     # Force live mic for this check regardless of config.
