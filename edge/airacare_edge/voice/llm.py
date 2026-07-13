@@ -15,11 +15,15 @@ from airacare_edge.cloud.contracts import ReplyIntent
 
 _SYSTEM = (
     "You classify an elderly patient's spoken reply to the question 'Are you okay?'. "
-    'Respond with ONLY compact JSON: {"status":"ok|distress|unclear","urgency":<0.0-1.0>}. '
+    'Respond with ONLY compact JSON: {"status":"ok|distress|unclear"}. '
     "ok = they are fine or reassuring. "
     "distress = they need help, are hurt, fell, or are frightened/confused. "
     "unclear = you genuinely cannot tell. Output no other text."
 )
+
+# Canonical urgency per status (keeps output consistent with the keyword path; the
+# LLM only decides the status, not the urgency number).
+_URGENCY = {"ok": 0.1, "distress": 0.9, "unclear": 0.5}
 
 
 class OllamaInterpreter:
@@ -58,14 +62,6 @@ class OllamaInterpreter:
             return None
 
         status = data.get("status")
-        if status not in ("ok", "distress", "unclear"):
+        if status not in _URGENCY:
             return None
-        try:
-            urgency = float(data.get("urgency", 0.5))
-        except (TypeError, ValueError):
-            urgency = 0.5
-        return ReplyIntent(
-            status=status,
-            urgency=max(0.0, min(1.0, urgency)),
-            transcript=transcript,
-        )
+        return ReplyIntent(status=status, urgency=_URGENCY[status], transcript=transcript)
