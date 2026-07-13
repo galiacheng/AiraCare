@@ -17,11 +17,16 @@ from airacare_edge.voice.nlu import keyword_intent
     [
         ("I'm fine", "ok"),
         ("okay thanks", "ok"),
+        ("yep yep yep", "ok"),            # affirmations: yep/yeah/yup
+        ("yeah I'm good", "ok"),
         ("help me", "distress"),
         ("I fell and it hurts", "distress"),
         ("", "no_response"),
         ("   ", "no_response"),
         ("the garden over there", "unclear"),
+        # regression: whole-word matching — "ok" must NOT match inside "looking"
+        ("just looking for some garden", "unclear"),
+        ("What do you mean? I don't understand.", "unclear"),
     ],
 )
 def test_keyword_intent(text, expected):
