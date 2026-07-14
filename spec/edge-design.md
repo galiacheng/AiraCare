@@ -1,7 +1,7 @@
 # AiraCare — Edge Agent Design (PoC)
 
 Detailed design for the **edge side** of AiraCare, flagship scenario **Nighttime
-Wandering**. This is the approved design that the `edge/` implementation follows.
+Wandering**.
 
 See also: [architecture.md](architecture.md) · [demo-scenarios.md](demo-scenarios.md).
 
@@ -13,7 +13,7 @@ See also: [architecture.md](architecture.md) · [demo-scenarios.md](demo-scenari
 |---|---|---|
 | 1 | Framework / language | Microsoft Agent Framework + **Python** |
 | 2 | Run location | **Devbox** (dev + demo); mic/speaker via RDP **Remote Audio** |
-| 3 | Local LLM | **Option B** — LLM interprets the *spoken reply*; event classification stays rule-based; keyword fast-path |
+| 3 | Local LLM | LLM interprets the *spoken reply*; event classification stays rule-based, with a keyword fast-path in front |
 | 4 | Scope | **Flagship Nighttime Wandering only**; video deferred (voice covers the multi-modal bonus) |
 | 5 | Cloud | Local **A2A stub** first, protocol-compatible so the real Foundry Hosted Agent drops in later |
 | 6 | Models | faster-whisper `small` int8 (ASR) · silero-VAD · Piper (TTS) · Phi-3.5-mini via Ollama (reply understanding) |
@@ -39,29 +39,42 @@ recording endpoint (verified), so live mic/speaker work for a normal app.
 
 ```
 edge/
-  pyproject.toml            # core deps + optional extras: [audio] [llm] [cloud] [dev]
+  pyproject.toml            # core deps + optional extras: [audio] [audio-neural] [llm] [cloud] [dev]
   config.yaml               # patient, quiet hours, thresholds, voice, cloud
   README.md
   airacare_edge/
-    agent.py                # Edge Core FSM (the Agent Framework agent) + service protocols
+    _console.py             # force UTF-8 stdout (safe emoji when piped on Windows)
+    agent.py                # Edge Core FSM + service protocols (Voice/Cloud/Alert)
+    cli.py                  # scenario runner (--scenario/--voice/--cloud/--panel)
+    main.py                 # scripted console demo
     config.py               # typed config (pydantic) loaded from config.yaml
     sensors/
       events.py             # RawSensorEvent
-      simulator.py          # canned nighttime-wander event injector
+      simulator.py          # nighttime-wander event injector
     reasoning/
       baseline.py           # rolling baseline + drift (quiet-hours aware)
       classifier.py         # raw events -> DailyLivingEvent (rule-based)
       escalation.py         # reply intent -> edge action / escalate
-    voice/                  # (step 4+) tts / asr / vad / dialog — not in step 1
-    privacy/                # (step 6) scrub raw audio -> features
+    voice/
+      tts.py                # SAPI TTS (say)
+      asr.py                # faster-whisper transcription (listen)
+      vad.py                # energy VAD + record_until_silence (no-response timeout)
+      nlu.py                # keyword-intent rule path
+      llm.py                # Ollama reply understanding (ambiguous replies only)
+      service.py            # LocalVoiceService (say / listen / interpret)
+      mic_check.py          # manual live-mic smoke test
+    privacy/
+      scrub.py              # raw audio -> non-reconstructable features
     cloud/
       contracts.py          # DailyLivingEvent, ReplyIntent, CloudDecision (pydantic)
       stub.py               # in-process LocalGradingEngine + LocalStubCloudClient
-      a2a_client.py         # (step 3) A2A client to stub / Foundry
+      a2a_client.py         # A2A/JSON-RPC client (local stub or Foundry)
+      a2a_stub.py           # local A2A server (Foundry stand-in)
+      factory.py            # build the CloudClient from config
+      queue.py              # offline store-and-forward queue
     ui/
-      panel.py              # (step 6) split-screen edge-vs-cloud console panel
-  tests/
-    test_wander_flow.py     # end-to-end flagship flow (fakes for voice/cloud)
+      panel.py              # split-screen edge-vs-cloud demo panel
+  tests/                    # unit + integration tests (fakes for voice/cloud)
 ```
 
 ## 4. Wandering flow — state machine
@@ -121,8 +134,8 @@ CloudDecision {
 - `CloudClient`: `submit(event) -> CloudDecision | None` (None ⇒ offline)
 - `AlertSink`: `local_alert(...)`, `notify_kin_sms(...)`
 
-Step 1 provides fakes/stub implementations so the whole flow runs deterministically
-with no mic, no Ollama, no network.
+The fake/stub implementations let the whole flow run deterministically with no mic, no
+Ollama, and no network (used throughout the tests).
 
 ## 7. Config surface (`config.yaml`)
 
@@ -140,7 +153,7 @@ cloud: { mode: stub, a2a_endpoint: "http://localhost:8971/a2a" }
 
 ## 8. Build order
 
-1. **Contracts + config + Edge Core FSM + local stub + unit tests** (pure logic — no models). ← *this step*
+1. **Contracts + config + Edge Core FSM + local stub + unit tests** (pure logic — no models).
 2. Sensor simulator wired to a console run of the full Edge→Cloud→Edge loop.
 3. A2A network stub (drop-in for Foundry) + `a2a_client`.
 4. Voice: TTS prompt → ASR → VAD timeout (rule path).
@@ -152,11 +165,11 @@ cloud: { mode: stub, a2a_endpoint: "http://localhost:8971/a2a" }
 
 - **Keyword fast-path** resolves obvious replies instantly; the LLM handles only
   ambiguous replies (masked by a short spoken filler).
-- LLM output constrained to tiny JSON (`{status, urgency}`) to minimize latency.
+- LLM output constrained to a tiny JSON (`{status}`) to minimize latency.
 - `no_response_seconds` is configurable (default a touch generous) to stay robust over
   Remote Audio buffering.
 
-## 10. Voice pipeline — roles & actors (step 4–5)
+## 10. Voice pipeline — roles & actors
 
 The active-confirm dialogue is a spoken exchange between **two actors**: the **AiraCare
 edge agent** and the **patient**. The agent's side is its *mouth* (speak) and its
