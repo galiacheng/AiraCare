@@ -53,16 +53,18 @@ Show the hybrid division + privacy boundary at a glance.
 python -m airacare_edge.cli --scenario no-response --panel
 ```
 **Say:** *"3 AM — the patient gets out of bed and opens the door. The edge asks 'are you
-okay?', hears no response, and escalates. Notice the **left** is the home/edge, the
-**right** is Foundry, and the red strip shows the **only** thing that crossed — a
-structured event, never raw audio."* → grade **L3**.
+okay?', hears no response, and **escalates on its own — immediately**. Notice the **left**
+is the home/edge (it decided **L3** and acted now), the **right** is Foundry replying
+**asynchronously**, and the red strip shows the **only** thing that crossed — a structured
+report, never raw audio."* → edge action **escalated**, cloud considered **L3**.
 
 ### Beat 2 — Graded, not spammy
 ```powershell
 python -m airacare_edge.cli --scenario reply-ok --panel
 ```
-**Say:** *"Same event, but the patient answers 'I'm fine'. The cloud grades it **L1** and
-loops a gentle voice prompt back to the edge — no family alarm. Anti-alert-fatigue."*
+**Say:** *"Same event, but the patient answers 'I'm fine'. The edge grades it **L1** and
+speaks a gentle reassurance locally — no family alarm, no cloud round-trip.
+Anti-alert-fatigue."*
 
 ### Beat 3 — Real voice + on-device LLM (the "smart" moment, live mic)
 ```powershell
@@ -85,9 +87,10 @@ Two terminals. Start with **no** A2A server running.
 # (server is OFF) — connectivity lost
 python -m airacare_edge.cli --scenario no-response --cloud a2a
 ```
-**Say:** *"Network's down. The edge still detects, still responds locally — light, sound,
-SMS to next of kin — and **persists the event** so nothing is lost."* (Note
-`path=offline_fallback`, `edge_action_taken=local_alert`, and one file queued.)
+**Say:** *"Network's down. The edge still detects, still decides, still acts locally — light,
+sound, SMS to next of kin — and **persists the report** so nothing is lost."* (Note
+`reported=False`, `edge_action_taken=escalated`, and one file queued — the edge acted
+regardless of the cloud.)
 
 Now bring connectivity back:
 ```powershell
@@ -106,12 +109,12 @@ automatically."* → look for `🔁 re-synced 1 queued event(s)`.
 
 | Criterion | What to point at |
 |---|---|
-| Clear edge/cloud division + *why* | The split-screen: sensing/voice/first-response on the edge; fusion/grading in the cloud |
+| Clear edge/cloud division + *why* | The split-screen: sensing/voice/**graded action** on the edge; async fusion/records/policy in the cloud |
 | Privacy / trustworthy | The red boundary strip — only `DailyLivingEvent` crosses; raw audio scrubbed on device |
-| Real-time, multi-modal | Live mic → VAD → whisper → intent, all local and instant |
+| Real-time, multi-modal | Live mic → VAD → whisper → intent → **edge acts**, all local and instant (no cloud wait) |
 | Token-frugal, autonomous | Keyword fast-path filters the obvious; LLM only on ambiguous; edge runs 24/7 mostly silent |
-| Faster / smarter / more trustworthy | Fast (edge ms + keyword), smart (LLM + cloud fusion), trustworthy (privacy boundary) |
-| Reliability | Offline fallback + store-and-forward re-sync |
+| Faster / smarter / more trustworthy | Fast (edge decides + acts in ms), smart (LLM + async cloud fusion + policy feedback), trustworthy (privacy boundary) |
+| Reliability | Edge always acts; report store-and-forward re-syncs when the cloud returns |
 | Vertical template | `DailyLivingEvent` unified model → add a `type` to cover meds, falls, meals — no new system |
 
 ---
@@ -124,8 +127,9 @@ cloud:
   mode: foundry
   a2a_endpoint: "https://<foundry-hosted-agent-endpoint>/a2a"
 ```
-The edge already speaks the A2A/JSON-RPC contract (`airacare.grade` → `CloudDecision`);
-point it at the real endpoint and provide credentials as required.
+The edge already speaks the A2A/JSON-RPC contract (`airacare.report` → `CloudAssessment`,
+`airacare.fetch_policy` → `EdgePolicyUpdate`); point it at the real endpoint and provide
+credentials as required.
 
 ---
 

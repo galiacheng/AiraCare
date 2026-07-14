@@ -4,15 +4,22 @@ Privacy-first, offline-capable **edge agent** for in-home Alzheimer's care. Flag
 scenario: **Nighttime Wandering**. Design: [../spec/edge-design.md](../spec/edge-design.md).
 
 > **Privacy boundary:** raw audio never leaves the device — only a structured
-> `DailyLivingEvent` is sent to the cloud.
+> `DailyLivingEvent` report is sent to the cloud.
+
+> **Edge is authoritative.** The edge decides L0–L3 and acts **immediately**
+> (reassure / local-alert / escalate); it **never waits on the cloud** on the safety
+> path. The cloud replies **asynchronously** with a `CloudAssessment` (considered
+> level, caregiver notifications, records) that piggybacks a `policy_version`; the
+> edge lazily pulls an `EdgePolicyUpdate` only when that version increases and
+> applies it to *future* behavior.
 
 ## Status — build steps 1–5
 
 Implemented so far:
 
-- **Step 1** — pure-logic core: `cloud/contracts.py`, `sensors/`, `reasoning/`,
-  `agent.py` (Edge Core FSM + `VoiceService`/`CloudClient`/`AlertSink` protocols),
-  in-process grading stub, unit tests.
+- **Step 1** — pure-logic core: `cloud/contracts.py`, `sensors/`, `reasoning/`
+  (`grader.py` = `EdgeGrader`/`EdgeDecision`), `agent.py` (edge-authoritative flow +
+  `VoiceService`/`CloudGateway`/`AlertSink` protocols), in-process cloud stub, unit tests.
 - **Step 2** — `cli.py`: interactive scenario runner with a printed privacy panel.
 - **Step 3** — A2A network path: `cloud/a2a_stub.py` + `cloud/a2a_client.py` +
   `cloud/factory.py` (drop-in for the real Foundry Hosted Agent).
@@ -28,8 +35,9 @@ Implemented so far:
 The edge is **feature-complete for the flagship flow**.
 
 > **Ollama is optional.** The LLM enhances only ambiguous replies. If Ollama isn't
-> running, the edge keeps the keyword result and the clarify loop / escalation handles
-> it. To enable it: install Ollama, `ollama pull phi3.5`, and `pip install -e ".[llm]"`.
+> running, the edge keeps the keyword result and the clarify loop / graded action
+> handles it. To enable it: install Ollama, `ollama pull phi3.5`, and
+> `pip install -e ".[llm]"`.
 
 ## Quickstart (dev)
 
@@ -48,8 +56,8 @@ pytest -q                          # includes the TTS->ASR round-trip
 Scenario runner (fake console voice):
 
 ```powershell
-python -m airacare_edge.cli --scenario no-response      # -> L3
-python -m airacare_edge.cli --scenario reply-ok         # -> L1 voice loop-back
+python -m airacare_edge.cli --scenario no-response      # edge -> L3 escalated (acts now)
+python -m airacare_edge.cli --scenario reply-ok         # edge -> L1 reassured (speaks locally)
 python -m airacare_edge.cli --scenario no-response --panel   # split-screen demo panel
 ```
 
