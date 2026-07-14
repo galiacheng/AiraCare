@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from airacare_edge.agent import FlowResult
+from airacare_edge.cloud.reporter import ReportOutcome
 
 _GRADE_STYLE = {"L0": "green", "L1": "cyan", "L2": "yellow", "L3": "bold red"}
 
@@ -58,20 +59,20 @@ def _edge_body(result: FlowResult, sensors: list[str], provenance: dict[str, Any
     return "\n".join(lines)
 
 
-def _cloud_body(result: FlowResult) -> str:
-    if not result.reported or result.assessment is None:
+def _cloud_body(outcome: ReportOutcome | None) -> str:
+    if outcome is None or not outcome.reported or outcome.assessment is None:
         return (
             "[bold red]⚠ OFFLINE[/bold red] — report queued (store-and-forward)\n\n"
             "The edge [b]already acted[/b] on its own decision;\n"
             "the report will re-sync when connectivity returns."
         )
-    a = result.assessment
+    a = outcome.assessment
     style = _GRADE_STYLE.get(a.considered_level, "white")
     lines = [f"[bold]Considered level[/bold]: [{style}]{a.considered_level}[/{style}]"]
     lines.append(f"[bold]Reason[/bold]: {a.reason}")
     lines.append(f"[bold]Policy version[/bold]: {a.policy_version}")
-    if result.policy_applied_version is not None:
-        lines.append(f"[bold green]↺ EdgePolicyUpdate applied → v{result.policy_applied_version}[/bold green]")
+    if outcome.policy_applied_version is not None:
+        lines.append(f"[bold green]↺ EdgePolicyUpdate applied → v{outcome.policy_applied_version}[/bold green]")
     if a.caregiver_notifications:
         lines.append("[bold]Cloud sent[/bold]:")
         for action in a.caregiver_notifications:
@@ -86,12 +87,14 @@ def render_split(
     provenance: dict[str, Any] | None = None,
     features: list[float] | None = None,
     cloud_mode: str = "stub",
+    outcome: ReportOutcome | None = None,
 ) -> None:
     """Render the split-screen panel to a rich Console."""
     from rich.panel import Panel
     from rich.rule import Rule
     from rich.table import Table
 
+    reported = outcome is not None and outcome.reported
     console.print(Rule("[bold]AiraCare — Nighttime Wandering[/bold]"))
     edge = Panel(
         _edge_body(result, sensors, provenance, features),
@@ -100,10 +103,10 @@ def render_split(
         border_style="blue",
     )
     cloud = Panel(
-        _cloud_body(result),
+        _cloud_body(outcome),
         title=f"☁ FOUNDRY — cloud (async) · {cloud_mode}",
         subtitle="considered assessment · policy",
-        border_style="green" if result.reported else "red",
+        border_style="green" if reported else "red",
     )
     # Table.grid forces a true side-by-side split (wraps content inside each column).
     grid = Table.grid(expand=True, padding=(0, 1))
@@ -128,8 +131,9 @@ def show(
     provenance: dict[str, Any] | None = None,
     features: list[float] | None = None,
     cloud_mode: str = "stub",
+    outcome: ReportOutcome | None = None,
 ) -> None:
     """Convenience: render to a default console (stdout)."""
     from rich.console import Console
 
-    render_split(Console(), result, sensors, provenance, features, cloud_mode)
+    render_split(Console(), result, sensors, provenance, features, cloud_mode, outcome)

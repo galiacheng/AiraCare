@@ -77,15 +77,21 @@ def _run(config: EdgeConfig) -> None:
     print("\n--- edge decision (authoritative — acted immediately) ---")
     if result.decision is not None:
         print(f"  level={result.decision.level} action={result.decision.action} reason={result.decision.reason}")
-    print(f"  handled={result.handled} path={result.path} reported={result.reported}")
+
+    # The safety action is already done. Reporting ran on a background worker; wait for it
+    # only so this scripted demo can print the async cloud assessment.
+    agent.reporter.join(timeout=6.0)
+    outcome = agent.reporter.last_outcome
+    reported = outcome.reported if outcome else False
+    print(f"  handled={result.handled} path={result.path} reported={reported} (report sent async)")
     if result.event is not None:
         print("\n--- 🔒 ONLY this crosses the boundary (DailyLivingEvent report) ---")
         print(json.dumps(json.loads(result.event.model_dump_json()), indent=2))
-    if result.assessment is not None:
+    if outcome is not None and outcome.assessment is not None:
         print("\n--- cloud assessment (async · considered) ---")
-        print(f"  considered_level={result.assessment.considered_level} policy_version={result.assessment.policy_version}")
-        print(f"  reason={result.assessment.reason}")
-        for action in result.assessment.caregiver_notifications:
+        print(f"  considered_level={outcome.assessment.considered_level} policy_version={outcome.assessment.policy_version}")
+        print(f"  reason={outcome.assessment.reason}")
+        for action in outcome.assessment.caregiver_notifications:
             print(f"  cloud sent: [{action.channel}] {action.message}")
     else:
         print("\n--- cloud: OFFLINE — report queued (edge already acted) ---")

@@ -92,6 +92,11 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
     events = sensor_factory(at=NIGHT)
     result = agent.handle_sensor_events(events)
 
+    # Safety action is done. Wait for the async report only so the demo can show the
+    # cloud's considered assessment (the edge never waits for this in production).
+    agent.reporter.join(timeout=6.0)
+    outcome = agent.reporter.last_outcome
+
     if panel:
         from airacare_edge.ui.panel import show
 
@@ -101,23 +106,25 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
             provenance=getattr(voice, "last_interpretation", None),
             features=getattr(voice, "last_features", None),
             cloud_mode=config.cloud.mode,
+            outcome=outcome,
         )
         return
 
+    reported = outcome.reported if outcome else False
     print(f"\n=== AiraCare edge — scenario '{scenario}' (cloud={config.cloud.mode}, voice={voice_mode}) ===")
     print(f"  🛰️ sensors: {[e.kind for e in events]} @ {NIGHT.isoformat()}")
     print("\n--- edge decision (authoritative — acted immediately) ---")
     if result.decision is not None:
         print(f"  level={result.decision.level} action={result.decision.action} reason={result.decision.reason}")
-    print(f"  handled={result.handled} path={result.path} reported={result.reported}")
+    print(f"  handled={result.handled} path={result.path} reported={reported} (report sent async)")
     if result.event is not None and result.handled:
         print("\n--- 🔒 ONLY this crosses the boundary (DailyLivingEvent report) ---")
         print(json.dumps(json.loads(result.event.model_dump_json()), indent=2))
-    if result.assessment is not None:
+    if outcome is not None and outcome.assessment is not None:
         print("\n--- cloud assessment (async · considered) ---")
-        print(f"  considered_level={result.assessment.considered_level} policy_version={result.assessment.policy_version}")
-        print(f"  reason={result.assessment.reason}")
-        for action in result.assessment.caregiver_notifications:
+        print(f"  considered_level={outcome.assessment.considered_level} policy_version={outcome.assessment.policy_version}")
+        print(f"  reason={outcome.assessment.reason}")
+        for action in outcome.assessment.caregiver_notifications:
             print(f"  cloud sent: [{action.channel}] {action.message}")
     else:
         print("\n--- cloud: OFFLINE — report queued (edge already acted) ---")

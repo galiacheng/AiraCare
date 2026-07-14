@@ -42,10 +42,10 @@ def test_offline_enqueues_then_reconnect_resends(tmp_path):
     queue = OfflineQueue(tmp_path / "q", ttl_seconds=3600)
 
     # 1) Offline: report unreachable -> edge still acts, event persisted.
-    result = _agent(FakeCloud(online=False), queue).handle_sensor_events(
-        nighttime_wander_events(at=NIGHT)
-    )
-    assert not result.reported
+    agent = _agent(FakeCloud(online=False), queue)
+    result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+    agent.reporter.join(timeout=5.0)
+    assert not agent.reporter.last_outcome.reported
     assert result.event.edge_action_taken == "escalated"
     assert queue.count() == 1  # persisted for later
 
@@ -62,5 +62,7 @@ def test_no_queue_still_works():
     # Agent without a queue still acts; the report is simply dropped when offline.
     agent = _agent(FakeCloud(online=False), queue=None)
     result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
-    assert not result.reported
+    agent.reporter.join(timeout=5.0)
+    assert result.handled
+    assert not agent.reporter.last_outcome.reported
     assert agent.flush_offline_queue() is None

@@ -82,12 +82,15 @@ def test_edge_agent_over_a2a_end_to_end():
             clock=lambda: NIGHT,
         )
         result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+        # Wait for the background report to reach the server before it shuts down.
+        agent.reporter.join(timeout=5.0)
+        outcome = agent.reporter.last_outcome
 
     assert result.handled
     assert result.path == "edge_L3"
-    assert result.reported
-    assert result.assessment is not None
-    assert result.assessment.considered_level == "L3"
+    assert outcome.reported
+    assert outcome.assessment is not None
+    assert outcome.assessment.considered_level == "L3"
     assert len(alerts.escalations) == 1  # edge acted immediately
 
 
@@ -115,8 +118,10 @@ def test_edge_agent_a2a_offline_still_acts_and_queues(tmp_path):
         queue=queue,
     )
     result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+    agent.reporter.join(timeout=5.0)
+    outcome = agent.reporter.last_outcome
 
-    assert not result.reported
+    assert not outcome.reported
     assert result.event.edge_action_taken == "escalated"
     assert len(alerts.escalations) == 1
     assert queue.count() == 1

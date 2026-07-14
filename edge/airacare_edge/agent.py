@@ -4,16 +4,20 @@ Orchestrates the flagship Nighttime Wandering flow:
 
     sense -> classify -> active voice confirm -> EDGE DECIDES (L0-L3) & ACTS NOW
           -> build DailyLivingEvent (report of what happened + what the edge did)
-          -> report to cloud (fire-and-forget; offline -> store-and-forward queue)
-          -> apply an EdgePolicyUpdate lazily when the report's policy_version changed
+          -> hand the report to a background worker (non-blocking; the safety action
+             never waits on the network). The worker sends it, applies an
+             EdgePolicyUpdate lazily when the report's policy_version changed, and
+             persists to the store-and-forward queue when offline.
 
-The edge is authoritative for the immediate action and **never waits for the cloud**.
-The core depends only on small service *protocols* (voice / cloud / alerts), so it runs
-deterministically in tests with fakes, and swaps to real implementations unchanged.
+The edge is authoritative for the immediate action and **never waits for the cloud** —
+reporting is an asynchronous side-effect, not a step in the safety path. The core depends
+only on small service *protocols* (voice / cloud / alerts), so it runs deterministically
+in tests with fakes, and swaps to real implementations unchanged.
 """
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable, Protocol, runtime_checkable
@@ -25,6 +29,7 @@ from airacare_edge.cloud.contracts import (
     ReplyIntent,
     utcnow,
 )
+from airacare_edge.cloud.reporter import ReportOutcome, ReportWorker
 from airacare_edge.config import EdgeConfig
 from airacare_edge.reasoning.classifier import WanderClassifier
 from airacare_edge.reasoning.grader import EdgeDecision, EdgeGrader
@@ -69,16 +74,19 @@ class CloudGateway(Protocol):
 
 @dataclass
 class FlowResult:
-    """Outcome of handling a batch of sensor events (drives tests + the UI panel)."""
+    """Synchronous outcome of the edge's safety decision (drives tests + the UI panel).
+
+    The cloud report is dispatched asynchronously; its result lives on the
+    :class:`~airacare_edge.cloud.reporter.ReportOutcome` (``agent.reporter.last_outcome``
+    after ``agent.reporter.join()``), never on the safety path.
+    """
 
     handled: bool
     path: str
     event: DailyLivingEvent | None = None
     reply: ReplyIntent | None = None
     decision: EdgeDecision | None = None
-    assessment: CloudAssessment | None = None
-    reported: bool = False  # did the report reach the cloud (vs. queued offline)?
-    policy_applied_version: int | None = None
+    dispatched: bool = False  # a cloud report was submitted to the async worker
 
 
 class EdgeAgent:
@@ -93,6 +101,7 @@ class EdgeAgent:
         clock: Callable[[], datetime] = utcnow,
         queue: "OfflineQueue | None" = None,
         policy_version: int = 1,
+        reporter: ReportWorker | None = None,
     ) -> None:
         self._config = config
         self._voice = voice
@@ -103,6 +112,9 @@ class EdgeAgent:
         self._clock = clock
         self._queue = queue
         self._policy_version = policy_version
+        self._policy_lock = threading.Lock()
+        # The reporter runs the (potentially slow) cloud call off the safety path.
+        self._reporter = reporter or ReportWorker(self._report)
 
     @property
     def config(self) -> EdgeConfig:
@@ -111,6 +123,10 @@ class EdgeAgent:
     @property
     def policy_version(self) -> int:
         return self._policy_version
+
+    @property
+    def reporter(self) -> ReportWorker:
+        return self._reporter
 
     def flush_offline_queue(self, now: datetime | None = None) -> "FlushResult | None":
         """Re-send any locally-persisted events (call when connectivity may be restored)."""
@@ -122,8 +138,24 @@ class EdgeAgent:
         now = self._clock()
         candidate = self._classifier.classify(events, self._config.patient.id, now)
 
-        if candidate is None or candidate.confidence < self._config.thresholds.wander_confidence:
-            return FlowResult(handled=False, path="below_threshold", event=candidate)
+        if candidate is None:
+            return FlowResult(handled=False, path="no_event")
+
+        # L0 — a minor deviation below the active-confirm threshold: log locally and
+        # report it (so the cloud can curate the daily record). No voice, no alert.
+        if candidate.confidence < self._config.thresholds.wander_confidence:
+            decision = EdgeDecision(
+                level="L0",
+                action="none",
+                reason="minor deviation below confirm threshold — logged",
+            )
+            event = candidate.model_copy(
+                update={"edge_assessed_level": "L0", "edge_action_taken": "none"}
+            )
+            self._reporter.submit(event)
+            return FlowResult(
+                handled=True, path="edge_L0", event=event, decision=decision, dispatched=True
+            )
 
         # 1) Active voice confirmation (bounded clarify loop).
         intent = self._active_confirm()
@@ -141,15 +173,9 @@ class EdgeAgent:
             }
         )
 
-        # 4) Report to the cloud (fire-and-forget). Offline -> store-and-forward.
-        assessment = self._cloud.report(event)
-        reported = assessment is not None
-        applied_version: int | None = None
-        if not reported:
-            if self._queue is not None:
-                self._queue.enqueue(event, now=now)
-        else:
-            applied_version = self._maybe_apply_policy(assessment)
+        # 4) Hand the report to the background worker — non-blocking. The safety action
+        #    above has already happened; the network call never gates it.
+        self._reporter.submit(event)
 
         return FlowResult(
             handled=True,
@@ -157,9 +183,26 @@ class EdgeAgent:
             event=event,
             reply=intent,
             decision=decision,
+            dispatched=True,
+        )
+
+    # --- background reporting (off the safety path) --------------------------
+    def _report(self, event: DailyLivingEvent) -> ReportOutcome:
+        """Runs on the reporter thread: send the report, apply policy, or queue offline."""
+        assessment = self._cloud.report(event)
+        if assessment is None:
+            queued = False
+            if self._queue is not None:
+                self._queue.enqueue(event, now=self._clock())
+                queued = True
+            return ReportOutcome(event=event, reported=False, queued=queued)
+        with self._policy_lock:
+            applied = self._maybe_apply_policy(assessment)
+        return ReportOutcome(
+            event=event,
+            reported=True,
             assessment=assessment,
-            reported=reported,
-            policy_applied_version=applied_version,
+            policy_applied_version=applied,
         )
 
     # --- edge actions (immediate) -------------------------------------------

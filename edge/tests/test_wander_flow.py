@@ -118,11 +118,18 @@ def _build_agent(
     )
 
 
+def _run(agent: EdgeAgent, events):
+    """Handle events, then wait for the async report so its outcome can be asserted."""
+    result = agent.handle_sensor_events(events)
+    agent.reporter.join(timeout=5.0)
+    return result, agent.reporter.last_outcome
+
+
 def test_no_response_edge_escalates_L3_and_acts_now():
     alerts = FakeAlerts()
     agent = _build_agent(FakeVoice(reply=None), alerts)
 
-    result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+    result, outcome = _run(agent, nighttime_wander_events(at=NIGHT))
 
     assert result.handled
     assert result.path == "edge_L3"
@@ -131,8 +138,8 @@ def test_no_response_edge_escalates_L3_and_acts_now():
     assert result.event.edge_action_taken == "escalated"
     assert result.event.context["response"] == "no_response"
     assert len(alerts.escalations) == 1  # edge acted immediately
-    assert result.reported
-    assert result.assessment.considered_level == "L3"
+    assert outcome.reported
+    assert outcome.assessment.considered_level == "L3"
 
 
 def test_patient_ok_gets_L1_and_edge_reassures_locally():
@@ -189,12 +196,50 @@ def test_offline_edge_still_acts_and_queues_report(tmp_path):
         queue=queue,
     )
 
-    result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+    result, outcome = _run(agent, nighttime_wander_events(at=NIGHT))
 
     assert result.handled
-    assert not result.reported
+    assert not outcome.reported
+    assert outcome.queued
     assert len(alerts.escalations) == 1  # the EDGE still acted (L3)
     assert queue.count() == 1  # report persisted for store-and-forward
+
+
+def test_low_confidence_candidate_is_L0_logged_and_reported():
+    # Threshold above the candidate's confidence -> L0: no voice, no alert, but reported.
+    config = _config().model_copy(
+        update={
+            "thresholds": Thresholds(
+                wander_confidence=0.95,
+                no_response_seconds=8,
+                correlation_window_seconds=120,
+            )
+        }
+    )
+    baseline = BaselineTracker(config.quiet_hours)
+    classifier = WanderClassifier(baseline, config.thresholds.correlation_window_seconds)
+    voice = FakeVoice(reply=None)
+    alerts = FakeAlerts()
+    cloud = FakeCloud(online=True)
+    agent = EdgeAgent(
+        config=config,
+        voice=voice,
+        cloud=cloud,
+        alerts=alerts,
+        classifier=classifier,
+        clock=lambda: NIGHT,
+    )
+
+    result, outcome = _run(agent, nighttime_wander_events(at=NIGHT))
+
+    assert result.handled and result.path == "edge_L0"
+    assert result.decision.level == "L0" and result.decision.action == "none"
+    assert result.event.edge_assessed_level == "L0"
+    assert voice.said == []  # no active confirmation for a minor L0 deviation
+    assert alerts.escalations == [] and alerts.local_alerts == []
+    assert outcome.reported  # L0 still crosses to the cloud (daily-record curation)
+    assert outcome.assessment.considered_level == "L0"
+    assert cloud.reported and cloud.reported[0].edge_assessed_level == "L0"
 
 
 def test_minor_motion_stays_below_threshold():
@@ -203,7 +248,8 @@ def test_minor_motion_stays_below_threshold():
     result = agent.handle_sensor_events(restless_but_in_bed_events(at=NIGHT))
 
     assert not result.handled
-    assert result.path == "below_threshold"
+    assert result.path == "no_event"
+    assert not result.dispatched
 
 
 def test_daytime_wander_still_detected_but_lower_confidence():

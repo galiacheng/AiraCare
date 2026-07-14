@@ -45,9 +45,11 @@ def test_new_policy_version_triggers_fetch_and_apply():
     agent = _agent(FakeCloud(online=True, policy=policy), policy_version=1)
 
     result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+    agent.reporter.join(timeout=5.0)
+    outcome = agent.reporter.last_outcome
 
-    assert result.assessment.policy_version == 7
-    assert result.policy_applied_version == 7
+    assert outcome.assessment.policy_version == 7
+    assert outcome.policy_applied_version == 7
     assert agent.policy_version == 7
     # Applied to FUTURE behavior (config mutated).
     assert agent.config.voice.reassure_prompt == "Custom reassure prompt"
@@ -59,8 +61,10 @@ def test_same_policy_version_no_apply():
     agent = _agent(FakeCloud(online=True), policy_version=1)  # stub reports policy_version=1
 
     result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+    agent.reporter.join(timeout=5.0)
+    outcome = agent.reporter.last_outcome
 
-    assert result.policy_applied_version is None
+    assert outcome.policy_applied_version is None
     assert agent.policy_version == 1
 
 
@@ -73,7 +77,9 @@ def test_offline_report_does_not_apply_policy(tmp_path):
     agent._queue = OfflineQueue(tmp_path / "q")  # noqa: SLF001 (test wiring)
 
     result = agent.handle_sensor_events(nighttime_wander_events(at=NIGHT))
+    agent.reporter.join(timeout=5.0)
+    outcome = agent.reporter.last_outcome
 
-    assert not result.reported
-    assert result.policy_applied_version is None
+    assert not outcome.reported
+    assert outcome.policy_applied_version is None
     assert agent.policy_version == 1  # offline -> keep last-applied policy
