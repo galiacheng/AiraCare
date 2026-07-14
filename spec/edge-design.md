@@ -125,6 +125,35 @@ stateDiagram-v2
 > (thresholds, quiet-hours, personalized prompts, geofence, disease-stage) to **future**
 > events. It is not part of the per-event flow above.
 
+**Edge ↔ cloud interaction (asynchronous — off the FSM).** The state machine above stays
+inside the home because the edge never waits on the cloud. The actual edge↔cloud handshake
+happens *after* the edge has acted, on the background worker:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Edge as Edge Agent
+    participant Rep as Report Worker
+    participant Cloud as Foundry
+    participant Q as Offline Queue
+
+    Note over Edge: decide L0–L3 and ACT NOW<br/>(voice / local alert / escalate)
+    Edge->>Rep: submit(DailyLivingEvent)
+    Note right of Edge: returns instantly — edge is Idle again,<br/>everything below is off the safety path
+    Rep->>Cloud: report(event)
+    alt cloud reachable
+        Cloud-->>Rep: CloudAssessment (+ policy_version)
+        opt policy_version > current
+            Rep->>Cloud: fetch_policy(since_version)
+            Cloud-->>Rep: EdgePolicyUpdate
+            Rep->>Edge: apply policy (tunes FUTURE events)
+        end
+    else offline
+        Cloud--xRep: unreachable
+        Rep->>Q: enqueue(event) — store-and-forward
+    end
+```
+
 ## 5. Contracts
 
 ```jsonc
