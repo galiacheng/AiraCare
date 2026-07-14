@@ -92,6 +92,35 @@ batch trend modeling.
 ╚════════════════════════════════════════════════════════════════════════════════════════════╝
 ```
 
+*Rendered view (same flow — solid = event report, dashed = async policy feedback):*
+
+```mermaid
+flowchart TD
+    subgraph EDGE["🏠 HOME / EDGE — privacy boundary · real-time · offline-capable"]
+        direction TB
+        S["Sensing<br/>mmWave radar · door/bed · IMU · pillbox · mic · local-CV"]
+        A1["1–4 · Sense → baseline drift → privacy scrub → voice confirm"]
+        ACT["5 · GRADED ACTION — acts now (no cloud wait)<br/>L0 log · L1 reassure · L2 local alert + SMS · L3 escalate"]
+        S -- "raw stream (local only — never leaves)" --> A1 --> ACT
+    end
+
+    subgraph CLOUD["☁ AZURE AI FOUNDRY / CLOUD — deep reasoning (async · off the safety path)"]
+        direction TB
+        ORC["Care Orchestrator — multi-agent<br/>Monitoring · Companion · Cognitive-trend · Briefing"]
+        FUSE["Fusion: baseline drift × disease stage × history<br/>→ CONSIDERED assessment (+ policy_version)"]
+        TOOLS["Tools / Skills / KB<br/>Notification · Geofence · Daily-report · Guidelines"]
+        ORC --> FUSE --> TOOLS
+    end
+
+    FAM["👪 Family App — digest / alerts"]
+    CLIN["🩺 Clinician — monthly trend report"]
+
+    ACT -- "report DailyLivingEvent<br/>(async · store-and-forward)" --> ORC
+    TOOLS -. "EdgePolicyUpdate — piggyback policy_version<br/>(tunes FUTURE events)" .-> A1
+    TOOLS -- "briefings + enriched caregiver comms" --> FAM
+    TOOLS --> CLIN
+```
+
 **Key change from a naive design:** the edge does **not** wait for a cloud verdict. It
 assigns its own `edge_assessed_level` and **acts immediately** (offline-safe). Only the
 resulting `DailyLivingEvent` crosses (a report, fire-and-forget). The cloud reasons
