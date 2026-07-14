@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="AiraCare logo mark">
+  <defs>
+    <linearGradient id="ac-halo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3FC8C0"/>
+      <stop offset="0.55" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="ac-home" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E9FBFA"/>
+    </linearGradient>
+    <radialGradient id="ac-glow" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#8AE9E3" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#8AE9E3" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- soft aura glow -->
+  <circle cx="128" cy="128" r="118" fill="url(#ac-glow)"/>
+
+  <!-- guardian halo ring (open at top-right = "watching / not a closed cage") -->
+  <path d="M128 26
+           a102 102 0 1 0 92 58"
+        fill="none" stroke="url(#ac-halo)" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- warm accent dot = the person being cared for -->
+  <circle cx="212" cy="60" r="13" fill="#FFB454"/>
+
+  <!-- protective home inside the aura -->
+  <g>
+    <path d="M128 78 L182 122 L182 182 A6 6 0 0 1 176 188 L80 188 A6 6 0 0 1 74 182 L74 122 Z"
+          fill="url(#ac-home)"/>
+    <!-- care-pulse heartbeat inside the home -->
+    <path d="M92 158 L112 158 L120 138 L134 174 L144 154 L164 154"
+          fill="none" stroke="#3B82F6" stroke-width="8"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

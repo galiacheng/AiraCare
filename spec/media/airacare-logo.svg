@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" role="img" aria-label="AiraCare logo lockup">
+  <defs>
+    <linearGradient id="l-halo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3FC8C0"/>
+      <stop offset="0.55" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="l-home" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E9FBFA"/>
+    </linearGradient>
+    <linearGradient id="l-word" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#334155"/>
+    </linearGradient>
+    <radialGradient id="l-glow" cx="0.5" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#8AE9E3" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#8AE9E3" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ===== mark ===== -->
+  <g transform="translate(20,18) scale(0.72)">
+    <circle cx="128" cy="128" r="118" fill="url(#l-glow)"/>
+    <path d="M128 26 a102 102 0 1 0 92 58"
+          fill="none" stroke="url(#l-halo)" stroke-width="18" stroke-linecap="round"/>
+    <circle cx="212" cy="60" r="13" fill="#FFB454"/>
+    <path d="M128 78 L182 122 L182 182 A6 6 0 0 1 176 188 L80 188 A6 6 0 0 1 74 182 L74 122 Z"
+          fill="url(#l-home)"/>
+    <path d="M92 158 L112 158 L120 138 L134 174 L144 154 L164 154"
+          fill="none" stroke="#3B82F6" stroke-width="8"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- ===== wordmark ===== -->
+  <text x="212" y="108" font-family="Segoe UI, Helvetica, Arial, sans-serif"
+        font-size="72" font-weight="700" letter-spacing="-1">
+    <tspan fill="url(#l-word)">Aira</tspan><tspan fill="#3B82F6">Care</tspan>
+  </text>
+
+  <!-- ===== tagline ===== -->
+  <text x="214" y="150" font-family="Segoe UI, Helvetica, Arial, sans-serif"
+        font-size="22" font-weight="500" fill="#64748B" letter-spacing="0.3">
+    Watches on the edge. Thinks in the cloud.
+  </text>
+  <text x="214" y="182" font-family="Segoe UI, Helvetica, Arial, sans-serif"
+        font-size="15" font-weight="500" fill="#94A3B8" letter-spacing="1.5">
+    HYBRID EDGE–FOUNDRY AGENT · ALZHEIMER'S HOME CARE
+  </text>
+</svg>

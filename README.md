@@ -29,6 +29,7 @@ graded decision-making in the cloud. Together they turn fragmented sensor alerts
 | [`spec/architecture.md`](spec/architecture.md) | Architecture, data flow, `DailyLivingEvent`, graded response ladder |
 | [`spec/demo-scenarios.md`](spec/demo-scenarios.md) | Flagship + roadmap scenarios |
 | [`spec/edge-design.md`](spec/edge-design.md) | Edge agent design (frameworks, models, state machine, voice pipeline) |
+| [`spec/foundry-design.md`](spec/foundry-design.md) | Foundry Care Orchestrator design (two-tier grading, connected agents, escalation, data layer) |
 | [`spec/demo-runbook.md`](spec/demo-runbook.md) | **Step-by-step demo script** |
 | [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
 
@@ -37,9 +38,13 @@ graded decision-making in the cloud. Together they turn fragmented sensor alerts
 - **Edge agent** (`edge/`, this repo) — sensors (simulated) → real voice (TTS + mic +
   VAD + faster-whisper) → keyword/LLM understanding (Ollama Phi-3.5-mini) → grading via
   A2A → offline store-and-forward. **Runs CPU-only.**
-- **Foundry Care Orchestrator** (owned by another team member) — the cloud "brain"
-  (Connected Agents, Toolboxes, Knowledge). The edge talks to it over A2A; a local stub
-  stands in during development (`cloud.mode: foundry` switches to the real one).
+- **Foundry Care Orchestrator** (see [`spec/foundry-design.md`](spec/foundry-design.md)) —
+  the cloud "brain": a **two-tier** decision agent (synchronous **reflex grade** < 5 s +
+  asynchronous **deliberate** reasoning/escalation) built on Foundry Connected Agents,
+  Toolboxes, and Azure AI Search knowledge. It is a **drop-in** for the local A2A stub —
+  same `airacare.grade` → `CloudDecision` contract; `cloud.mode: foundry` switches to the
+  real one. Demo state runs on a local store; production graduates to Cosmos DB mirrored
+  into Microsoft Fabric/OneLake for analytics + Power BI reporting.
 
 ## Quick start (edge)
 
