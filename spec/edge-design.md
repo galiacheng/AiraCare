@@ -37,8 +37,9 @@ recording endpoint (verified), so live mic/speaker work for a normal app.
   (Critical for an Alzheimer's patient: silence/confusion is itself a risk signal — the
   safe default is act-now, bias-to-escalate.)
 - **Offline-first:** the edge completes its safety job with no network; reporting to the
-  cloud is fire-and-forget with store-and-forward. A local queue + fallback prove the
-  "cable-pull" independence.
+  cloud is a **non-blocking background side-effect** (a worker thread) with
+  store-and-forward. A local queue + fallback prove the "cable-pull" independence — the
+  safety action never waits on the report.
 - **A2A drop-in:** the local stub speaks the same message contract as the real Foundry
   agent; switching is an endpoint/credential change.
 
@@ -61,7 +62,7 @@ edge/
     reasoning/
       baseline.py           # rolling baseline + drift (quiet-hours aware)
       classifier.py         # raw events -> DailyLivingEvent (rule-based)
-      escalation.py         # reply intent -> edge action / escalate
+      grader.py             # reply intent -> edge L0-L3 decision + action
     voice/
       tts.py                # SAPI TTS (say)
       asr.py                # faster-whisper transcription (listen)
@@ -73,11 +74,12 @@ edge/
     privacy/
       scrub.py              # raw audio -> non-reconstructable features
     cloud/
-      contracts.py          # DailyLivingEvent, ReplyIntent, CloudDecision (pydantic)
-      stub.py               # in-process LocalGradingEngine + LocalStubCloudClient
+      contracts.py          # DailyLivingEvent, CloudAssessment, EdgePolicyUpdate (pydantic)
+      stub.py               # in-process LocalCloudStub (report + fetch_policy)
       a2a_client.py         # A2A/JSON-RPC client (local stub or Foundry)
       a2a_stub.py           # local A2A server (Foundry stand-in)
-      factory.py            # build the CloudClient from config
+      factory.py            # build the CloudGateway from config
+      reporter.py           # background report worker (non-blocking; off the FSM)
       queue.py              # offline store-and-forward queue
     ui/
       panel.py              # split-screen edge-vs-cloud demo panel
@@ -86,32 +88,36 @@ edge/
 
 ## 4. Wandering flow — state machine
 
-The edge **decides and acts on its own**; reporting to the cloud is asynchronous and
-never gates the action.
+The edge **decides and acts on its own**. Reporting to the cloud is **not** a state: once
+the edge has acted, the event is handed to a background worker (async, store-and-forward),
+so the network never gates the safety response.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
     Idle --> Detecting: sensor event (out_of_bed / door_open)
     Detecting --> Classify: correlate + nighttime + baseline drift
-    Classify --> Idle: below threshold (log L0)
-    Classify --> ActiveConfirm: type=wander, confidence >= threshold
+    Classify --> Idle: no event
+    Classify --> LogL0: minor deviation (below confirm threshold)
+    Classify --> ActiveConfirm: wander, confidence >= threshold
 
     ActiveConfirm --> Listening: TTS "are you okay?"
     Listening --> Interpret: speech captured (ASR)
     Listening --> NoResponse: VAD timeout
 
-    Interpret --> Reassure: reply = ok
-    Interpret --> Escalate: reply = distress (or unclear after clarify)
+    Interpret --> Reassure: reply ok
+    Interpret --> Escalate: distress / unclear-after-clarify
     NoResponse --> Escalate
 
-    Reassure --> Report: edge L1 - speak guidance locally
-    Escalate --> Report: edge L2/L3 - local alert + SMS (+ community/emergency)
-    Report --> Idle: report event + edge action to cloud (async, store-and-forward)
+    LogL0 --> Idle: edge L0 - log locally
+    Reassure --> Idle: edge L1 - speak guidance
+    Escalate --> Idle: edge L2/L3 - alert + SMS
 
     note right of Escalate
         Edge acts NOW - never waits for the cloud.
-        Cloud analysis is asynchronous.
+        Reporting is a background side-effect (async worker,
+        store-and-forward): every event L0-L3 is reported,
+        but it is NOT a state and never gates the action.
     end note
 ```
 
@@ -179,11 +185,13 @@ no full policy on every event. Offline, the edge keeps using its last-applied po
 - `VoiceService`: `say(text)`, `listen(timeout) -> transcript | None`, `interpret(transcript) -> ReplyIntent`
 - `AlertSink`: `local_alert(...)`, `notify_kin_sms(...)`, `escalate(...)` — the edge's own
   immediate actions
-- `CloudClient`: `report(event) -> CloudAssessment | None` — **fire-and-forget** report;
-  `None` ⇒ offline, so the event is queued for store-and-forward. The edge has **already
-  acted** before it reports; it never blocks on the response.
-- `PolicyClient`: `fetch_policy(patient_id, since_version) -> EdgePolicyUpdate | None` —
-  async control-plane; the edge applies the update to future events.
+- `CloudGateway`: `report(event) -> CloudAssessment | None` (`None` ⇒ offline) and
+  `fetch_policy(patient_id, since_version) -> EdgePolicyUpdate | None`. The edge has
+  **already acted** before anything is reported.
+- `ReportWorker`: a background worker the agent submits reports to. `submit(event)` returns
+  immediately (**never on the safety path**); the worker thread calls `CloudGateway.report`,
+  applies a piggybacked `EdgePolicyUpdate`, or persists to the store-and-forward queue when
+  offline. `join()` is used only by tests/the demo to await the async outcome.
 
 The fake/stub implementations let the whole flow run deterministically with no mic, no
 Ollama, and no network (used throughout the tests).

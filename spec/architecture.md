@@ -193,7 +193,7 @@ may match, enrich, or refine the record) plus caregiver briefings and edge polic
 
 | Level | Trigger (edge, immediate) | Edge action — now | Cloud — async, considered |
 |---|---|---|---|
-| L0 self-handle | minor deviation | log locally | curate into daily report |
+| L0 self-handle | minor deviation | log locally + report | curate into daily report |
 | L1 gentle guidance | suspected anomaly | edge **reassures/guides** by voice ("it's late, let's rest") | note pattern; personalize the future prompt (policy) |
 | L2 notify caregiver | medium risk | **local alert + SMS to kin** | enrich caregiver comms with fused context ("3rd wander this week") |
 | L3 emergency escalation | fall no-response / left geofence / no-response wander | **escalate**: alarm + SMS + community/emergency | attach fusion context + replay; file report |
