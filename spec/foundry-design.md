@@ -88,24 +88,44 @@ real events, and heavy analytics is offloaded to compute (not the LLM).
 
 ## 5. Architecture on Azure AI Foundry
 
-```
-                 A2A endpoint  (airacare.grade)
-                        │  DailyLivingEvent
-                        ▼
-      ┌──────────── Care Orchestrator (Foundry Hosted Agent) ─────────────┐
-      │  T1 Reflex Grader ───────────────► returns CloudDecision (<5s) ────┼──► edge
-      │        │  (reads patient state + grading policy)                    │
-      │        └─ enqueues async job ▼                                      │
-      │  T2 Connected Agents (orchestrated):                               │
-      │   • Risk-Reasoning agent   fusion × disease-stage × baseline drift  │
-      │   • Knowledge agent   ───► Azure AI Search (care-guideline RAG)     │
-      │   • Escalation agent  ───► timed ladder: family→community→emergency │
-      │   • Cognitive-Trend agent ─► batch voice-biomarker modeling         │
-      │   • Briefing agent    ───► family daily / clinician monthly report  │
-      │                                                                    │
-      │  Tools: NotifyTool(push/SMS) · GeofenceTool · EscalationTimer       │
-      │  Memory: Patient State Store (baseline, disease-stage, history)     │
-      └────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    edge["AiraCare Edge"]
+
+    edge -->|"A2A / JSON-RPC 2.0<br/>airacare.grade { DailyLivingEvent }"| T1
+
+    subgraph orchestrator["Care Orchestrator — Foundry Hosted Agent"]
+        direction TB
+        T1["T1 · Reflex Grader<br/>patient-state-aware policy"]
+        store[("Patient State Store<br/>baseline · disease-stage · history")]
+        T1 <-->|reads state| store
+
+        subgraph T2["T2 · Connected Agents (async, long-running)"]
+            direction TB
+            risk["Risk-Reasoning<br/>fusion × stage × baseline drift"]
+            know["Knowledge<br/>care-guideline RAG"]
+            esc["Escalation<br/>timed ladder"]
+            trend["Cognitive-Trend<br/>batch voice-biomarker modeling"]
+            brief["Briefing<br/>family daily · clinician monthly"]
+        end
+
+        T1 -->|enqueue async job| T2
+
+        subgraph tools["Tools"]
+            direction TB
+            notify["NotifyTool · push/SMS"]
+            geo["GeofenceTool"]
+            timer["EscalationTimer"]
+        end
+    end
+
+    T1 -->|"CloudDecision (< 5 s)"| edge
+    know -->|vector RAG| search[("Azure AI Search<br/>care-guideline KB")]
+    esc -->|"family → community → emergency"| ladder(["Escalation ladder"])
+    esc -.uses.-> notify
+    esc -.uses.-> timer
+    risk -.uses.-> geo
+    brief -.->|reports| report(["Power BI / family briefing"])
 ```
 
 ## 6. Grading policy (how L0–L3 is decided)
