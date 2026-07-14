@@ -1,0 +1,19 @@
+# Foundry Care Orchestrator — cloud target for the edge agent
+server:
+  host: "127.0.0.1"
+  port: 8971                 # matches edge cloud.a2a_endpoint (http://localhost:8971/a2a)
+
+# Patient-state store (Decision #6 = C: local for this scaffold)
+store:
+  backend: local             # local (SQLite / in-memory) | cosmos (placeholder — not wired)
+  sqlite_path: ":memory:"    # ":memory:" for ephemeral, or a file path to persist
+
+# Default patient profile seeded into the local store (drives disease-stage reasoning)
+patient:
+  id: p-001
+  name: Grandpa Zhang
+  disease_stage: moderate    # mild | moderate | severe
+
+# Asynchronous DELIBERATE tier (multi-agent fusion) — stubbed for this scaffold
+deliberate:
+  enabled: false
