@@ -6,11 +6,14 @@ that the edge talks to over A2A. Flagship scenario **Nighttime Wandering**.
 See also: [architecture.md](architecture.md) · [edge-design.md](edge-design.md) ·
 [demo-scenarios.md](demo-scenarios.md) · [demo-runbook.md](demo-runbook.md).
 
-The edge is feature-complete and **freezes the contract** (`airacare.grade` →
-`CloudDecision`). The Foundry side is therefore not greenfield: it is a **drop-in
-replacement for the local `LocalGradingEngine` stub** that speaks the same A2A wire
-protocol but adds real depth (personalization, knowledge grounding, autonomous
-escalation, reporting).
+The edge is authoritative: it **decides L0–L3 and acts immediately, and never waits for
+the cloud**. The cloud is therefore **off the real-time safety path**. The edge freezes
+the contract (`airacare.report` → `CloudAssessment`, `airacare.fetch_policy` →
+`EdgePolicyUpdate`); the Foundry Care Orchestrator is a **drop-in replacement for the
+local `LocalCloudStub`** that speaks the same A2A wire protocol but adds real depth:
+personalized *considered* assessment, knowledge-grounded caregiver comms, an autonomous
+ack-tracked escalation ladder, longitudinal trends/briefings, and the **policy learning**
+that tunes the edge's future behavior.
 
 ---
 
@@ -20,71 +23,97 @@ escalation, reporting).
 |---|---|---|
 | 1 | Runtime | **Azure AI Foundry Agent Service** — Care Orchestrator as a **Hosted Agent** |
 | 2 | Multi-agent | **Foundry Connected Agents** for the deliberate (T2) orchestration |
-| 3 | Latency strategy | **Two-tier**: synchronous **reflex grade** (< 5 s) + asynchronous **deliberate** reasoning/escalation |
+| 3 | Latency strategy | **Off the safety path** — the edge already acted. The report returns a quick **considered assessment** (records + immediate caregiver comms); deep reasoning, the escalation ladder, trends, and policy learning run **asynchronously** (T2). |
 | 4 | Knowledge | **Azure AI Search** RAG over care guidelines / clinical protocols |
-| 5 | Models | GPT-4o-mini for reflex + most sub-agents; GPT-4o for hard reasoning |
+| 5 | Models | GPT-4o-mini for the considered assessment + most sub-agents; GPT-4o for hard reasoning |
 | 6 | Data (see §7) | **Demo/MVP = local store (SQLite/in-memory)**; **production target = Cosmos DB (operational) mirrored into Microsoft Fabric/OneLake for analytics + Power BI** |
-| 7 | Notifications | **Cloud-owned** dispatch + timed escalation ladder (edge only executes `edge_directive`) |
-| 8 | Drop-in | Same A2A `airacare.grade` contract → edge switches via `cloud.mode: foundry` only |
-| 9 | MVP scope | Flagship **wander** grade + escalation ladder + one knowledge-grounded advice + family briefing |
+| 7 | Notifications | **Cloud-owned** enriched dispatch + timed ack-tracked escalation ladder (the edge already fired its own immediate local alert + SMS to kin) |
+| 8 | Drop-in | Same A2A `airacare.report` / `airacare.fetch_policy` contract → edge switches via `cloud.mode: foundry` only |
+| 9 | MVP scope | Flagship **wander** considered assessment + escalation ladder + one knowledge-grounded advice + family briefing + a `policy_version` bump the edge pulls |
 
-**Constraint that drives everything:** the edge `A2AClient` timeout is **5 s**; on any
-timeout/failure the edge goes **offline** and self-handles. So the Foundry agent must
-return a **safe grade within ~5 s** no matter how deep the reasoning goes.
+**What drives the design:** the edge never blocks on the cloud, so there is **no hard
+real-time budget on the safety path**. The report call still returns promptly (the edge's
+report worker uses a ~5 s timeout, then falls back to the store-and-forward queue), but a
+slow or missing response only delays *records and caregiver enrichment* — never the
+patient-facing action, which already happened on the edge.
 
 ## 2. Design principles
 
-- **Reflex before reflection.** A fast, safe grade is returned synchronously (T1); the
-  expensive multi-agent reasoning, knowledge grounding, escalation, and reporting run
-  **after** the response as a long-running, autonomous workflow (T2). The edge never
-  waits on deliberation.
-- **Drop-in, not rebuild.** The Foundry agent honors the exact `airacare.grade` →
-  `CloudDecision` contract the edge already speaks. Switching from the local stub is a
-  config change (`cloud.mode: foundry`), never an edge code change.
-- **The cloud owns notifications & escalation.** The cloud has the contact directory,
-  ack tracking, and escalation timers. The edge only ever acts on
-  `edge_directive.voice_prompt` (the L1 loop-back) and its own **offline** local alerts.
+- **Edge acts, cloud reflects.** The edge has already decided and acted by the time the
+  report arrives. The cloud never returns an action the edge waits on; it produces a
+  *considered* assessment (for records + caregiver comms) and, separately, **policy** that
+  tunes the edge's **future** behavior. Nothing here is on the real-time safety path.
+- **Drop-in, not rebuild.** The Foundry agent honors the exact `airacare.report` →
+  `CloudAssessment` and `airacare.fetch_policy` → `EdgePolicyUpdate` contract the edge
+  already speaks. Switching from the local stub is a config change (`cloud.mode: foundry`),
+  never an edge code change.
+- **The cloud owns enriched notifications & escalation.** The edge fires its **own**
+  immediate local action (light/sound, SMS to next of kin, or escalate) without waiting.
+  The cloud then runs the **ack-tracked multi-channel ladder** (family → community →
+  emergency) and enriches caregiver comms with fused history — it has the contact
+  directory and the escalation timers.
+- **Feedback as policy, not commands.** The cloud never micromanages a single event; its
+  learning is distilled into an **`EdgePolicyUpdate`** (thresholds, quiet-hours, prompts,
+  geofence, disease-stage) delivered lazily via the `policy_version` piggyback hint.
 - **Privacy boundary is inherited and absolute.** Only `DailyLivingEvent` crosses;
   everything the cloud stores is **derived** from it. No raw audio/video/point-cloud is
   persisted anywhere, edge or cloud.
-- **Cheap fast-path, expensive only when needed.** Mirrors the edge's own pattern: the
-  reflex grade is policy/light-model; the LLM + RAG multi-agent deliberation only fires
-  on real events (the edge already filters ~99% of no-event data) — token-frugal.
+- **Cheap fast-path, expensive only when needed.** The considered assessment is
+  policy/light-model; the LLM + RAG multi-agent deliberation only fires on real events
+  (the edge already filters ~99% of no-event data) — token-frugal.
 
 ## 3. The frozen contract (inherited from the edge)
 
 ```jsonc
-// Inbound — A2A / JSON-RPC 2.0
-{ "jsonrpc":"2.0", "id":1, "method":"airacare.grade",
+// Inbound — A2A / JSON-RPC 2.0 — a REPORT of what the edge saw AND already did
+{ "jsonrpc":"2.0", "id":1, "method":"airacare.report",
   "params": { "event": DailyLivingEvent } }
 
 // DailyLivingEvent (the ONLY thing that crosses the privacy boundary)
 DailyLivingEvent {
   type: "fall|wander|med|meal|routine", confidence, timestamp, patient_id,
-  features: [float],            // privacy-scrubbed; never raw audio
-  baseline_deviation, edge_action_taken: "none|prompted|local_alert",
+  features: [float],                 // privacy-scrubbed; never raw audio
+  baseline_deviation,
+  edge_assessed_level: "L0|L1|L2|L3",             // the edge's OWN immediate decision
+  edge_action_taken: "none|reassured|local_alert|escalated",  // what the edge already did
   context: { time_of_day, door_open, response, ... }
 }
 
-// Outbound — CloudDecision (drives edge action)
-CloudDecision {
-  grade: "L0|L1|L2|L3",
+// Outbound — CloudAssessment (async ack; the edge has ALREADY acted, it does not wait)
+CloudAssessment {
+  considered_level: "L0|L1|L2|L3",   // may match, enrich, or refine the edge's level
   reason: "explainable why",
-  actions: [ { channel:"log|family|community|emergency", message, target } ],  // audit of what the cloud is doing
-  edge_directive: { voice_prompt: string|null }   // the ONLY field the edge acts on directly
+  caregiver_notifications: [ { channel:"family|community|emergency", message, target } ],
+  policy_version: 7,                 // PIGGYBACK HINT — latest policy the cloud has
+  report_ref: "daily/2026-07-13"     // where this event was filed
+}
+
+// Inbound — lazy policy pull, only when the piggybacked policy_version changed
+{ "jsonrpc":"2.0", "id":2, "method":"airacare.fetch_policy",
+  "params": { "patient_id": "p-001", "since_version": 1 } }
+
+// Outbound — EdgePolicyUpdate (tunes the edge's FUTURE behavior; null if unchanged)
+EdgePolicyUpdate {
+  version: 7, issued_at, patient_id,
+  wander_confidence, no_response_seconds, max_clarify_retries,   // thresholds
+  confirm_prompt, reassure_prompt, clarify_prompt,               // personalized prompts
+  disease_stage, notes
 }
 ```
 
-## 4. Two-tier decision architecture
+## 4. Two-tier processing (both OFF the safety path)
 
-| Tier | When | What | Latency budget |
+The edge never waits, so neither tier has a real-time deadline. The split is about the
+*responsiveness of records/comms* vs *depth of reasoning*, not about gating the edge.
+
+| Tier | When | What | Target |
 |---|---|---|---|
-| **T1 — Reflex grade** (sync) | every event | patient-state-aware policy → `CloudDecision` (grade + reason + intended actions). Reads hot patient state (baseline, disease stage). Guarantees a safe answer to the edge. | **< 5 s** (target < 1 s) |
-| **T2 — Deliberate** (async, long-running) | after the sync reply | Connected Agents: knowledge-ground the advice, dispatch multi-channel notifications **with a timed escalation ladder**, update baseline/trend, generate briefings. May *upgrade* and push a follow-up on a separate caregiver channel. | seconds–minutes, autonomous |
+| **T1 — Considered assessment** (on the report call) | every reported event | patient-state-aware policy → `CloudAssessment` (considered level + reason + the caregiver comms it is initiating + current `policy_version`). Reads hot patient state (baseline, disease stage). | **prompt** (~1 s; the edge worker times out ~5 s → store-and-forward) |
+| **T2 — Deliberate** (async, long-running) | after the report reply | Connected Agents: knowledge-ground the advice, run the **ack-tracked** multi-channel escalation ladder, update baseline/trend, generate briefings, and **distill an `EdgePolicyUpdate`** (bumping `policy_version`) the edge pulls lazily. | seconds–minutes, autonomous |
 
 This split is also the answer to the judges' *"long-running autonomous / token-hungry?"*
-questions: the autonomous escalation + trend work lives in T2; tokens are spent only on
-real events, and heavy analytics is offloaded to compute (not the LLM).
+questions: the autonomous escalation + trend + policy-learning work lives in T2; tokens are
+spent only on real events, and heavy analytics is offloaded to compute (not the LLM).
 
 ## 5. Architecture on Azure AI Foundry
 
@@ -92,21 +121,24 @@ real events, and heavy analytics is offloaded to compute (not the LLM).
 flowchart TD
     edge["AiraCare Edge"]
 
-    edge -->|"A2A / JSON-RPC 2.0<br/>airacare.grade { DailyLivingEvent }"| T1
+    edge -->|"A2A / JSON-RPC 2.0<br/>airacare.report { DailyLivingEvent }"| T1
 
     subgraph orchestrator["Care Orchestrator — Foundry Hosted Agent"]
         direction TB
-        T1["T1 · Reflex Grader<br/>patient-state-aware policy"]
+        T1["T1 · Considered Assessor<br/>patient-state-aware policy (+policy_version)"]
         store[("Patient State Store<br/>baseline · disease-stage · history")]
+        policy[("Policy Store<br/>versioned EdgePolicyUpdate")]
         T1 <-->|reads state| store
+        T1 <-->|reads version| policy
 
         subgraph T2["T2 · Connected Agents (async, long-running)"]
             direction TB
             risk["Risk-Reasoning<br/>fusion × stage × baseline drift"]
             know["Knowledge<br/>care-guideline RAG"]
-            esc["Escalation<br/>timed ladder"]
+            esc["Escalation<br/>ack-tracked ladder"]
             trend["Cognitive-Trend<br/>batch voice-biomarker modeling"]
             brief["Briefing<br/>family daily · clinician monthly"]
+            learn["Policy-Learning<br/>distills EdgePolicyUpdate (version++)"]
         end
 
         T1 -->|enqueue async job| T2
@@ -119,39 +151,46 @@ flowchart TD
         end
     end
 
-    T1 -->|"CloudDecision (< 5 s)"| edge
+    T1 -->|"CloudAssessment (records + caregiver comms)"| edge
+    edge -.->|"airacare.fetch_policy (lazy, on version bump)"| policy
+    policy -.->|"EdgePolicyUpdate"| edge
     know -->|vector RAG| search[("Azure AI Search<br/>care-guideline KB")]
     esc -->|"family → community → emergency"| ladder(["Escalation ladder"])
     esc -.uses.-> notify
     esc -.uses.-> timer
     risk -.uses.-> geo
+    learn -.writes.-> policy
     brief -.->|reports| report(["Power BI / family briefing"])
 ```
 
-## 6. Grading policy (how L0–L3 is decided)
+## 6. Assessment policy (how the considered level is decided)
 
-The reflex grade combines three inputs, weighted by disease stage:
+The considered level combines three inputs, weighted by disease stage:
 
 `risk = f(event.type, event.confidence, baseline_deviation, context) × disease_stage_weight`
 
-Flagship **wander** policy (parity with the current stub, now personalized):
+Flagship **wander** policy (parity with the current stub, now personalized). The edge has
+**already acted** on its `edge_assessed_level`; the cloud's `considered_level` may match,
+enrich, or refine it, and drives the caregiver comms:
 
-| Reply / context | Grade | Cloud action | Edge directive |
-|---|---|---|---|
-| `no_response` / `distress` | **L3** | notify family → (ladder) community → emergency | — |
-| `unclear` | **L2** | notify family to check | — |
-| `ok` (patient reassured) | **L1** | none (log) | `voice_prompt`: gentle guidance back to bed |
-| below confidence threshold | **L0** | log only → daily briefing | — |
+| Reply / context (from the report) | Considered | Cloud action (enriched, ack-tracked) |
+|---|---|---|
+| `no_response` / `distress` | **L3** | notify family → (ladder) community → emergency, with fused context |
+| `unclear` | **L2** | notify family to check + "3rd wander this week" enrichment |
+| `ok` (patient reassured) | **L1** | none (log); note the pattern → personalize the future `reassure_prompt` (policy) |
+| below confidence threshold | **L0** | log only → daily briefing |
 
 Disease stage tunes thresholds (e.g. a *severe*-stage patient's nighttime out-of-bed
 weights higher). The **reason** string is always populated for explainability, and is
-enriched by the Knowledge agent in T2.
+enriched by the Knowledge agent in T2. When the cloud's view diverges from the edge's over
+time (e.g. it wants an earlier confirm threshold), it encodes that as an **`EdgePolicyUpdate`**
+— never as a per-event command.
 
 ## 7. Data & storage (decision #6 = **C**)
 
-**Demo / MVP (build now):** the reflex grade + escalation run against a **tiny local
-store** — SQLite (or in-memory) holding per-patient baseline, disease stage, and recent
-event history. This keeps the 5 s reflex budget safe and adds **zero cloud
+**Demo / MVP (build now):** the considered assessment + escalation run against a **tiny
+local store** — SQLite (or in-memory) holding per-patient baseline, disease stage, and
+recent event history. This keeps the report response prompt and adds **zero cloud
 infrastructure** to the live demo.
 
 **Production target (stated, not built for the hackathon):** split by workload and let
@@ -161,7 +200,8 @@ Fabric mirror handle analytics with no ETL:
 |---|---|---|
 | **Raw audio/video/point-cloud** | **nowhere** — edge RAM only, discarded after feature extraction | the privacy boundary |
 | Offline event backlog | **edge disk** `.airacare_queue/` (TTL-bounded) | already built |
-| **Patient State** (baseline, stage, contacts, history) | **Azure Cosmos DB**, partition = `patient_id` | single-digit-ms → protects the 5 s budget |
+| **Patient State** (baseline, stage, contacts, history) | **Azure Cosmos DB**, partition = `patient_id` | single-digit-ms → keeps the report response prompt |
+| **Edge policy** (versioned per patient) | **Azure Cosmos DB**, partition = `patient_id` | served by `fetch_policy`; edge pulls on a `policy_version` bump |
 | Analytics / trends / longitudinal modeling | **Microsoft Fabric** (Eventhouse/KQL + Lakehouse/Delta, Spark) via **Cosmos→OneLake mirroring** | zero-copy, no ETL |
 | Family daily / clinician monthly reports | **Power BI** on OneLake | native dashboards |
 | Condition-based alert triggers | **Data Activator** | complements the agent's escalation ladder |
@@ -191,9 +231,12 @@ notify community/watch ──(ack? within T_community)──► resolve
 emergency (120 / caregiver-on-call), attach location + event context
 ```
 
-The Escalation agent + `EscalationTimer` tool own this. `CloudDecision.actions` returned
-synchronously is an **audit record** of what the cloud is initiating; the actual sends
-and ack-waits happen in T2. This is the concrete "long-running autonomous agent."
+The Escalation agent + `EscalationTimer` tool own this. Note the edge has **already** fired
+its own immediate local alert + SMS to next of kin the moment it graded L2/L3 — the cloud
+does **not** blindly repeat that; it runs the **ack-tracked multi-channel ladder** and
+enriches with fused context. The `caregiver_notifications` returned on the report are an
+**audit record** of what the cloud is initiating; the actual sends and ack-waits happen in
+T2. This is the concrete "long-running autonomous agent."
 
 ## 9. Multi-modal understanding (honest framing under the privacy boundary)
 
@@ -212,28 +255,30 @@ foundry/
   pyproject.toml
   config.yaml                    # models, AI Search endpoint, store mode (local|cosmos), contacts
   airacare_foundry/
-    a2a_server.py                # A2A/JSON-RPC endpoint: airacare.grade -> CloudDecision (drop-in for a2a_stub)
-    orchestrator.py              # Care Orchestrator: T1 reflex + enqueue T2
-    reflex/
-      grader.py                  # patient-state-aware reflex policy (parity+ with stub)
+    a2a_server.py                # A2A/JSON-RPC: airacare.report -> CloudAssessment + airacare.fetch_policy -> EdgePolicyUpdate (drop-in for a2a_stub)
+    orchestrator.py              # Care Orchestrator: T1 considered assessment + enqueue T2
+    assess/
+      assessor.py                # patient-state-aware considered-level policy (parity+ with stub)
       policy.py                  # L0–L3 thresholds × disease stage
     agents/                      # T2 Connected Agents
       risk_reasoning.py
       knowledge.py               # Azure AI Search RAG
-      escalation.py              # timed ladder
+      escalation.py              # ack-tracked ladder
       cognitive_trend.py         # batch modeling
       briefing.py                # family/clinician reports
+      policy_learning.py         # distills EdgePolicyUpdate (version++)
     tools/
       notify.py                  # push/SMS
       geofence.py
       escalation_timer.py
     store/
-      base.py                    # PatientStateStore protocol
+      base.py                    # PatientStateStore + PolicyStore protocols
       local.py                   # SQLite/in-memory (MVP)  ← used for the demo
       cosmos.py                  # production (mirrored to Fabric/OneLake)
-    contracts.py                 # re-uses the SAME DailyLivingEvent/CloudDecision models
+    contracts.py                 # re-uses the SAME DailyLivingEvent / CloudAssessment / EdgePolicyUpdate models
   tests/
-    test_grade_parity.py         # returns identical grades to the stub for the flagship
+    test_report_parity.py        # returns the same CloudAssessment as the stub for the flagship
+    test_fetch_policy.py         # fetch_policy returns EdgePolicyUpdate only when version changed
     test_escalation_ladder.py
 ```
 
@@ -242,10 +287,11 @@ foundry/
 
 ## 11. Build order (MVP-first)
 
-1. **A2A server + reflex grader** returning the flagship `wander` grade with **parity to
-   the stub** (proves drop-in; `test_grade_parity`). ← start here
+1. **A2A server + considered assessor** returning the flagship `wander` `CloudAssessment`
+   with **parity to the stub** (proves drop-in; `test_report_parity`), plus `fetch_policy`
+   returning an `EdgePolicyUpdate` only when `policy_version` changed. ← start here
 2. **Local PatientStateStore** (SQLite) + disease-stage/baseline personalization in the
-   reflex grade.
+   considered assessment.
 3. **Async escalation ladder** (family→community→emergency + ack timers) — the
    long-running story.
 4. **Knowledge agent** (Azure AI Search) → grounded advice woven into `reason`/briefing.
@@ -263,8 +309,8 @@ foundry/
 | Multi-agent orchestration | Care Orchestrator + Connected Agents (§5) |
 | Toolboxes / Skills / Hosted Agents | Notify/Geofence/EscalationTimer tools; Hosted Agent runtime |
 | Complex multi-modal understanding | fused event streams + longitudinal voice-biomarker modeling (§9) |
-| Long-running autonomous | timed escalation ladder + batch trend/briefing (T2, §8) |
-| Token-frugal | reflex policy is cheap; LLM/RAG only on real events; analytics is compute |
+| Long-running autonomous | ack-tracked escalation ladder + batch trend/briefing + policy learning (T2, §8) |
+| Token-frugal | the considered-assessment policy is cheap; LLM/RAG only on real events; analytics is compute |
 | Vertical template / biz potential | `DailyLivingEvent` one-engine model + Fabric/Power BI population-health story |
 
 ## 13. Switching the edge from stub → Foundry
@@ -275,5 +321,6 @@ cloud:
   mode: foundry
   a2a_endpoint: "https://<foundry-hosted-agent-endpoint>/a2a"
 ```
-The edge already speaks `airacare.grade` → `CloudDecision`; point it at the real endpoint
-and provide credentials. The local `a2a_stub` and this Foundry agent are wire-identical.
+The edge already speaks `airacare.report` → `CloudAssessment` and `airacare.fetch_policy`
+→ `EdgePolicyUpdate`; point it at the real endpoint and provide credentials. The local
+`a2a_stub` and this Foundry agent are wire-identical.
