@@ -16,7 +16,7 @@ See also: [architecture.md](architecture.md) · [demo-scenarios.md](demo-scenari
 | 3 | Local LLM | LLM interprets the *spoken reply*; event classification stays rule-based, with a keyword fast-path in front |
 | 4 | Scope | **Flagship Nighttime Wandering only**; video deferred (voice covers the multi-modal bonus) |
 | 5 | Cloud | Local **A2A stub** first, protocol-compatible so the real Foundry Hosted Agent drops in later |
-| 6 | Models | faster-whisper `small` int8 (ASR) · silero-VAD · Piper (TTS) · Phi-3.5-mini via Ollama (reply understanding) |
+| 6 | Models | SAPI TTS (say) · energy VAD · faster-whisper `small` int8 (ASR) · Phi-3.5-mini via Ollama (reply understanding). Optional neural backends: Piper (TTS) + silero-VAD via `[audio-neural]` |
 | 7 | Audio config | `voice.input: mic \| file` — `mic` = Remote Audio for demo, `file` = deterministic dev |
 
 **Hardware note:** the run target is CPU-only (Hyper-V VM, 8C/64GB — no GPU/NPU), so
@@ -178,15 +178,20 @@ edge agent** and the **patient**. The agent's side is its *mouth* (speak) and it
 `no_response` and escalated.
 
 ```
-Piper speaks prompt → mic records → silero-VAD (speech? / silence-timeout?)
-                    → faster-whisper transcribes → Ollama interprets meaning
+SAPI TTS speaks prompt → mic records → energy VAD (speech? / silence-timeout?)
+                      → faster-whisper transcribes → Ollama interprets meaning
 ```
+
+> **Backends:** the PoC ships with **SAPI TTS** (offline, no model download on Windows)
+> and a lightweight **energy VAD**. Higher-fidelity neural backends — **Piper** (TTS) and
+> **silero-VAD** — are available via the `[audio-neural]` extra and drop in behind the
+> same interfaces.
 
 | # | Step | Component | Actor / role | Input → Output |
 |---|---|---|---|---|
-| 1 | Piper speaks prompt | Piper TTS | 🗣️ **Agent — mouth**: voices the prompt aloud | text → speaker audio |
+| 1 | TTS speaks prompt | SAPI TTS (Piper optional) | 🗣️ **Agent — mouth**: voices the prompt aloud | text → speaker audio |
 | 2 | Mic records | mic + `sounddevice` (Remote Audio) | 👂 **Agent — ear (capture)**: records the patient (or silence) | sound → raw audio (stays on device) |
-| 3 | silero-VAD | silero-VAD | 🎯 **Agent — attention / turn-taking**: is anyone speaking? when did they stop? fires the **no-response timeout** | audio frames → speech/no-speech + silence-timeout |
+| 3 | VAD | energy VAD (silero optional) | 🎯 **Agent — attention / turn-taking**: is anyone speaking? when did they stop? fires the **no-response timeout** | audio frames → speech/no-speech + silence-timeout |
 | 4 | faster-whisper transcribes | faster-whisper ASR | ✍️ **Agent — transcriber**: speech → words | speech audio → transcript text |
 | 5 | Ollama interprets meaning | Phi-3.5-mini via Ollama | 🧠 **Agent — comprehension**: what did the reply mean? | transcript → `ReplyIntent{status, urgency}` |
 | — | (responds by voice or stays silent) | — | 🧑‍🦳 **Patient — the second speaker**: the response steps 2–4 perceive | speech / silence |
@@ -196,7 +201,7 @@ live entirely behind the protocol):
 
 | `VoiceService` method | Pipeline steps | Returns |
 |---|---|---|
-| `say(text)` | 1 (Piper) | — |
+| `say(text)` | 1 (TTS) | — |
 | `listen(timeout)` | 2 + 3 + 4 (mic → VAD → whisper) | transcript, or **`None`** on silence-timeout |
 | `interpret(transcript)` | 5 (keyword fast-path → Ollama) | `ReplyIntent` |
 
