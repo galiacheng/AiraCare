@@ -4,9 +4,10 @@ The edge is authoritative: it grades and acts on its own, then *reports* the eve
 orchestrator implements the same ``CloudGateway`` contract the edge expects
 (``report`` + ``fetch_policy``) and composes the two decision tiers:
 
-- **REFLEX (synchronous):** :class:`ReflexPolicy` loads patient state and returns a safe,
-  considered :class:`CloudAssessment` inside the edge's 5s budget.
-- **DELIBERATE (asynchronous):** :class:`DeliberateTier` is scheduled fire-and-forget for
+- **T1 — Considered assessment (synchronous):** :class:`AssessmentPolicy` loads patient
+  state and returns a considered :class:`CloudAssessment` promptly. It is **off the edge's
+  safety path** — the edge has already acted; this response is for records + caregiver comms.
+- **T2 — Deliberate (asynchronous):** :class:`DeliberateTier` is scheduled fire-and-forget for
   deeper multi-agent reasoning, notifications, and escalation; it never blocks or changes
   the synchronous response.
 
@@ -18,18 +19,18 @@ when it exceeds the edge's version the edge lazily calls :meth:`fetch_policy` to
 from __future__ import annotations
 
 from airacare_foundry.agents.deliberate import DeliberateTier
+from airacare_foundry.assess.assessor import ConsideredAssessor
+from airacare_foundry.assess.policy import AssessmentPolicy
 from airacare_foundry.config import FoundryConfig
 from airacare_foundry.contracts import CloudAssessment, DailyLivingEvent, EdgePolicyUpdate
-from airacare_foundry.reflex.grader import ReflexGrader
-from airacare_foundry.reflex.policy import ReflexPolicy
 from airacare_foundry.store.base import PatientState, PatientStateStore
 from airacare_foundry.store.local import seeded_local_store
 
 
 class CareOrchestrator:
-    """Reflex-first cloud gateway with an asynchronous deliberate tier.
+    """Considered-assessment-first cloud gateway with an asynchronous deliberate tier.
 
-    Implements the edge's ``CloudGateway`` protocol: ``report`` (sync assessment) and
+    Implements the edge's ``CloudGateway`` protocol: ``report`` (T1 assessment) and
     ``fetch_policy`` (lazy control-plane update).
     """
 
@@ -37,7 +38,7 @@ class CareOrchestrator:
         self,
         store: PatientStateStore,
         *,
-        grader: ReflexGrader | None = None,
+        assessor: ConsideredAssessor | None = None,
         deliberate: DeliberateTier | None = None,
         policy: EdgePolicyUpdate | None = None,
         policy_version: int = 1,
@@ -45,14 +46,14 @@ class CareOrchestrator:
         self._store = store
         self._policy_obj = policy
         self._policy_version = policy.version if policy is not None else policy_version
-        self._policy = ReflexPolicy(store, grader)
+        self._policy = AssessmentPolicy(store, assessor)
         self._deliberate = deliberate or DeliberateTier(enabled=False)
 
     def report(self, event: DailyLivingEvent) -> CloudAssessment | None:
-        """Synchronous reflex assessment; schedules deliberate reasoning fire-and-forget."""
+        """T1 considered assessment; schedules deliberate reasoning fire-and-forget."""
         state = self._policy.resolve_state(event)
         assessment = self._policy.assess(event, policy_version=self._policy_version)
-        # Enhancement tier — must never delay or alter the reflex response.
+        # Enhancement tier — must never delay or alter the T1 response.
         self._deliberate.schedule(event, state)
         return assessment
 

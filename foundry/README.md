@@ -29,17 +29,18 @@ cloud:
   a2a_endpoint: "http://localhost:8971/a2a"
 ```
 
-> **Note on the design doc:** `spec/foundry-design.md` still describes an earlier
-> `airacare.grade` → `CloudDecision` contract. The edge code has since moved to the
-> edge-authoritative `report` / `fetch_policy` model above; this package follows the edge
-> **code** (the real wire contract) so it stays a genuine drop-in.
+> **Contract source of truth:** this package follows the edge **code** — the real A2A wire
+> contract (`airacare.report` / `airacare.fetch_policy`) — so it stays a genuine drop-in.
+> `spec/foundry-design.md` describes the same edge-authoritative `report` / `fetch_policy`
+> model.
 
 ### Two decision tiers
 
-- **REFLEX (synchronous, < 5s):** deterministic assessment with **parity** to the edge
-  stub — the edge's `A2AClient` times out at 5s, so the safe response always comes from
-  here.
-- **DELIBERATE (asynchronous):** placeholder for the multi-agent fusion tier
+- **T1 — Considered assessment (synchronous):** deterministic assessment with **parity** to
+  the edge stub. It is **off the edge's safety path** — the edge already decided and acted;
+  this response is for records + caregiver comms (the edge's report worker only waits ~5s
+  before store-and-forward).
+- **T2 — Deliberate (asynchronous):** placeholder for the multi-agent fusion tier
   (Risk-Reasoning / Knowledge / Escalation / Cognitive-trend / Briefing). Scheduled
   fire-and-forget; stubbed in this scaffold.
 
@@ -55,9 +56,9 @@ Patient state (disease stage + rolling baseline) lives in a **local** store —
 airacare_foundry/
   contracts.py      # byte-compatible copy of the edge contracts
   config.py         # typed config (pydantic) from config.yaml
-  orchestrator.py   # CareOrchestrator: reflex (sync) + deliberate (async stub)
+  orchestrator.py   # CareOrchestrator: T1 considered assessment (sync) + deliberate (async stub)
   a2a_server.py     # A2A / JSON-RPC server (Foundry stand-in)
-  reflex/           # grader (parity) + policy (reads the store)
+  assess/           # considered assessor (parity) + policy (reads the store)
   store/            # base protocol + local SQLite store + cosmos placeholder
   agents/           # DELIBERATE tier stub
   tools/            # cloud-owned notification stub
@@ -78,9 +79,9 @@ python -m airacare_foundry.a2a_server --config config.yaml
 pytest -q
 ```
 
-The parity test (`tests/test_grade_parity.py`) compares the Foundry reflex grader against
-the edge stub directly; it imports the sibling `edge/` package and skips gracefully if it
-isn't present.
+The parity test (`tests/test_report_parity.py`) compares the Foundry considered assessor
+against the edge stub directly; it imports the sibling `edge/` package and skips gracefully
+if it isn't present.
 
 ## Optional extras
 

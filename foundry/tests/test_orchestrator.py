@@ -1,4 +1,4 @@
-"""Orchestrator tests: reflex assessment via the store-backed policy + config + policy."""
+"""Orchestrator tests: considered assessment via the store-backed policy + config + policy."""
 
 from __future__ import annotations
 

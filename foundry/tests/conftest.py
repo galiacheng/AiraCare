@@ -2,8 +2,8 @@
 
 The foundry package (``airacare_foundry``) and the edge package (``airacare_edge``) live in
 sibling directories. Adding both roots to ``sys.path`` lets the tests run straight from a
-checkout without installing anything, and lets the parity test compare the Foundry reflex
-grader against the edge stub. The edge import is optional — parity tests skip if it's absent.
+checkout without installing anything, and lets the parity test compare the Foundry considered
+assessor against the edge stub. The edge import is optional — parity tests skip if it's absent.
 """
 
 from __future__ import annotations

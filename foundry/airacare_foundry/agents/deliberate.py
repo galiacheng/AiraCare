@@ -4,7 +4,7 @@ The real deliberate tier hosts the Connected Agents (Risk-Reasoning / Knowledge 
 Escalation / Cognitive-Trend / Briefing; see foundry-design.md §5) that fuse events over
 time, ground advice in knowledge, and drive the cloud-owned timed escalation ladder. In
 this scaffold it is a fire-and-forget placeholder: the orchestrator schedules it after
-answering the synchronous reflex assessment, and it never blocks or affects that response.
+answering the synchronous T1 considered assessment, and it never blocks or affects that response.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ class DeliberateTier:
 
     ``enabled`` mirrors ``config.deliberate.enabled``; when off, :meth:`schedule` is a
     no-op. When on, it records the request (a real implementation would enqueue work for
-    the Connected Agents). It intentionally does nothing that could delay the reflex reply.
+    the Connected Agents). It intentionally does nothing that could delay the T1 reply.
     """
 
     def __init__(self, *, enabled: bool = False) -> None:

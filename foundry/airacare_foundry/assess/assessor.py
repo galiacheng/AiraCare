@@ -1,16 +1,17 @@
-"""Reflex assessor — deterministic, sub-5s cloud assessment with parity to the edge stub.
+"""Considered Assessor — deterministic T1 assessment with parity to the edge stub.
 
 The edge is **authoritative**: it grades and acts on its own, then *reports* the event
 (with its ``edge_assessed_level``). The cloud returns a *considered* :class:`CloudAssessment`
-for the record and drives caregiver notifications — it never gates the edge.
+for the record and drives caregiver notifications — it **never gates the edge**, which has
+already acted.
 
 This reproduces ``edge/airacare_edge/cloud/stub.py::LocalCloudStub.report`` so the Foundry
-orchestrator is a true drop-in for the edge's local stub. It runs on the synchronous REFLEX
-tier: pure rule evaluation, always returns a valid :class:`CloudAssessment` well inside the
-edge's 5s timeout.
+orchestrator is a true drop-in for the edge's local stub. It is the synchronous T1 tier:
+pure rule evaluation that always returns a valid :class:`CloudAssessment` promptly — off the
+edge's safety path (the edge's report worker only waits ~5s before store-and-forward).
 
 The optional :class:`PatientState` lets the assessment be personalized (disease stage /
-baseline). Defaults preserve exact parity with the edge stub — see ``reflex/policy.py`` for
+baseline). Defaults preserve exact parity with the edge stub — see ``assess/policy.py`` for
 how state is loaded and applied.
 """
 
@@ -24,8 +25,8 @@ from airacare_foundry.contracts import (
 from airacare_foundry.store.base import PatientState
 
 
-class ReflexGrader:
-    """Deterministic assessment rules — the safe synchronous decision tier."""
+class ConsideredAssessor:
+    """Deterministic assessment rules — the synchronous T1 considered-assessment tier."""
 
     def assess(
         self,
@@ -35,8 +36,8 @@ class ReflexGrader:
         policy_version: int = 1,
     ) -> CloudAssessment:
         """Considered view of a reported event (mirrors the edge stub for parity)."""
-        # The cloud's considered view. For the reflex tier it mirrors the edge's own level
-        # and attaches the caregiver comms it would send.
+        # The cloud's considered view. For T1 it mirrors the edge's own level and attaches
+        # the caregiver comms it would send.
         notifications: list[CloudAction] = []
         if event.edge_assessed_level in ("L2", "L3"):
             notifications.append(

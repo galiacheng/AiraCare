@@ -1,4 +1,4 @@
-"""Parity: the Foundry reflex assessor returns the same CloudAssessment as the edge stub.
+"""Parity: the Foundry considered assessor returns the same CloudAssessment as the edge stub.
 
 This is the drop-in guarantee — for the flagship ``wander`` cases, the Foundry orchestrator
 assesses identically to ``edge/airacare_edge/cloud/stub.py::LocalCloudStub``. The edge
@@ -14,8 +14,8 @@ import json
 
 import pytest
 
+from airacare_foundry.assess.assessor import ConsideredAssessor
 from airacare_foundry.contracts import DailyLivingEvent, utcnow
-from airacare_foundry.reflex.grader import ReflexGrader
 
 edge_stub = pytest.importorskip(
     "airacare_edge.cloud.stub", reason="edge package not importable from sibling path"
@@ -52,10 +52,10 @@ def _edge_assessment(event: DailyLivingEvent):
 
 
 @pytest.mark.parametrize("response,level,action", FLAGSHIP_CASES)
-def test_reflex_assessment_matches_edge_stub(response: str, level: str, action: str) -> None:
+def test_considered_assessment_matches_edge_stub(response: str, level: str, action: str) -> None:
     event = _wander_event(response, level, action)
 
-    foundry_assessment = ReflexGrader().assess(event)
+    foundry_assessment = ConsideredAssessor().assess(event)
     edge_assessment = _edge_assessment(event)
 
     # Primary requirement: same considered level as the edge stub.
@@ -75,7 +75,7 @@ def test_l0_routine_parity() -> None:
         edge_action_taken="none",
         context={"response": None},
     )
-    foundry_assessment = ReflexGrader().assess(event)
+    foundry_assessment = ConsideredAssessor().assess(event)
     edge_assessment = _edge_assessment(event)
 
     assert foundry_assessment.considered_level == edge_assessment.considered_level == "L0"

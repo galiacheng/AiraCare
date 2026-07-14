@@ -1,7 +1,7 @@
-"""Patient-state store — the contract the reflex policy reads from.
+"""Patient-state store — the contract the assessment policy reads from.
 
 Decision #6 = C: this scaffold uses a **local** store (see ``local.py``). The
-:class:`PatientStateStore` protocol keeps the reflex policy decoupled from the backend so
+:class:`PatientStateStore` protocol keeps the assessment policy decoupled from the backend so
 a Cosmos DB / Fabric implementation (``cosmos.py``) can drop in later behind the same
 interface with no policy changes.
 """

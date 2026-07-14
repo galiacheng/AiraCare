@@ -3,7 +3,7 @@
 Decision #6 = C: this scaffold deliberately uses the local SQLite store (``local.py``). This
 module exists only to reserve the seam: it implements the same :class:`PatientStateStore`
 protocol so a real Azure Cosmos DB (or Microsoft Fabric) backend can drop in later without
-touching the reflex policy or orchestrator. Every method raises ``NotImplementedError``.
+touching the assessment policy or orchestrator. Every method raises ``NotImplementedError``.
 """
 
 from __future__ import annotations

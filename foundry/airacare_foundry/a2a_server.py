@@ -3,7 +3,7 @@
 A stdlib HTTP server that speaks the exact JSON-RPC 2.0 / A2A envelope the edge's
 ``A2AClient`` expects. It is a **drop-in replacement** for
 ``edge/airacare_edge/cloud/a2a_stub.py`` — same two methods, but backed by the
-:class:`CareOrchestrator` (reflex assessment + async deliberate tier) instead of the edge's
+:class:`CareOrchestrator` (T1 considered assessment + async deliberate tier) instead of the edge's
 in-process stub:
 
 - ``airacare.report``       params ``{event}``                     -> ``CloudAssessment | null``

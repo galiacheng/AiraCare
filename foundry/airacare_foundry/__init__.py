@@ -6,8 +6,9 @@ is a drop-in replacement: the edge points at this server with ``cloud.mode: foun
 no other change.
 
 The edge is authoritative — it grades and acts on its own, then reports the event. The
-cloud returns a considered assessment. Two decision tiers: a synchronous REFLEX assessment
-(safe, < 5s) and an asynchronous DELIBERATE tier (stubbed in this scaffold).
+cloud returns a considered assessment. Two decision tiers: a synchronous T1 considered
+assessment (off the edge's safety path) and an asynchronous DELIBERATE tier (T2, stubbed
+in this scaffold).
 """
 
 __all__ = ["__version__"]
