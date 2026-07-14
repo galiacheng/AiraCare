@@ -19,12 +19,17 @@ thresholds:
 voice:
   input: file                    # file (deterministic dev) | mic (Remote Audio demo)
   asr_model: small               # faster-whisper size
+  tts_engine: sapi               # sapi (Windows, default) | piper (neural)
   tts_voice: en_US-medium        # Piper voice
   llm_model: phi3.5              # Ollama model for reply understanding
   use_llm_for_ambiguous: true    # keyword fast-path first; LLM only for ambiguous replies
   max_clarify_retries: 1         # on 'unclear', re-ask once then escalate (never loop)
+  # Edge-owned prompts (the edge speaks these locally; personalized via EdgePolicyUpdate)
+  confirm_prompt: "{name}, are you okay?"
+  reassure_prompt: "It's late. Let's head back to bed — I'll leave a soft light on."
+  clarify_prompt: "I didn't catch that. Are you okay?"
 
-# Cloud target
+# Cloud target (async — the edge acts first, then reports here)
 cloud:
-  mode: stub                     # stub (local grading) | foundry (real Hosted Agent)
+  mode: stub                     # stub (local async assessment) | foundry (real Hosted Agent)
   a2a_endpoint: "http://localhost:8971/a2a"

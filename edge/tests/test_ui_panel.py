@@ -8,10 +8,11 @@ from datetime import datetime, timezone
 from airacare_edge.agent import FlowResult
 from airacare_edge.cloud.contracts import (
     CloudAction,
-    CloudDecision,
+    CloudAssessment,
     DailyLivingEvent,
     ReplyIntent,
 )
+from airacare_edge.reasoning.grader import EdgeDecision
 
 
 def _result(offline: bool = False) -> FlowResult:
@@ -21,19 +22,24 @@ def _result(offline: bool = False) -> FlowResult:
         timestamp=datetime(2026, 7, 13, 3, 0, tzinfo=timezone.utc),
         patient_id="p-001",
         baseline_deviation=0.95,
-        edge_action_taken="prompted" if not offline else "local_alert",
+        edge_assessed_level="L3",
+        edge_action_taken="escalated",
         context={"time_of_day": "night", "response": "no_response"},
     )
+    decision = EdgeDecision(level="L3", action="escalated", reason="no response -> escalate")
     if offline:
-        return FlowResult(handled=True, path="offline_fallback", event=event,
-                          reply=ReplyIntent(status="no_response"), cloud_decision=None, offline=True)
-    decision = CloudDecision(
-        grade="L3",
+        return FlowResult(handled=True, path="edge_L3", event=event,
+                          reply=ReplyIntent(status="no_response"), decision=decision,
+                          assessment=None, reported=False)
+    assessment = CloudAssessment(
+        considered_level="L3",
         reason="door open at night + no response -> high wandering risk",
-        actions=[CloudAction(channel="family", message="check immediately")],
+        caregiver_notifications=[CloudAction(channel="family", message="check immediately")],
+        policy_version=1,
     )
-    return FlowResult(handled=True, path="cloud_L3", event=event,
-                      reply=ReplyIntent(status="no_response"), cloud_decision=decision, offline=False)
+    return FlowResult(handled=True, path="edge_L3", event=event,
+                      reply=ReplyIntent(status="no_response"), decision=decision,
+                      assessment=assessment, reported=True)
 
 
 def _render(result: FlowResult, provenance=None) -> str:
@@ -62,6 +68,6 @@ def test_panel_shows_llm_provenance():
     assert "LLM" in out
 
 
-def test_panel_offline_shows_fallback():
+def test_panel_offline_shows_queued():
     out = _render(_result(offline=True))
     assert "OFFLINE" in out.upper()

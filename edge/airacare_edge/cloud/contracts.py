@@ -1,8 +1,10 @@
 """Data contracts shared across the edge agent and the cloud boundary.
 
-Only :class:`DailyLivingEvent` crosses the privacy boundary to the cloud. It is built
-exclusively from these typed models, so it is structurally impossible to attach raw
-audio/video to the uplink.
+Only :class:`DailyLivingEvent` crosses the privacy boundary to the cloud. It is a
+*report* of what the edge saw AND already did (the edge decides and acts on its own;
+the cloud never gates the action). The cloud returns an async :class:`CloudAssessment`
+(with a ``policy_version`` piggyback hint) and, when policy changes, an
+:class:`EdgePolicyUpdate` fetched lazily.
 """
 
 from __future__ import annotations
@@ -13,10 +15,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 EventType = Literal["fall", "wander", "med", "meal", "routine"]
-EdgeActionTaken = Literal["none", "prompted", "local_alert"]
+EdgeActionTaken = Literal["none", "reassured", "local_alert", "escalated"]
 Grade = Literal["L0", "L1", "L2", "L3"]
 ReplyStatus = Literal["ok", "distress", "unclear", "no_response"]
 ActionChannel = Literal["log", "family", "community", "emergency"]
+DiseaseStage = Literal["mild", "moderate", "severe"]
 
 
 def utcnow() -> datetime:
@@ -25,7 +28,11 @@ def utcnow() -> datetime:
 
 
 class DailyLivingEvent(BaseModel):
-    """The unified event abstraction — the ONLY thing that crosses to the cloud."""
+    """The unified event abstraction — the ONLY thing that crosses to the cloud.
+
+    It is a report: ``edge_assessed_level`` and ``edge_action_taken`` record the edge's
+    own immediate decision and the action it already took.
+    """
 
     type: EventType
     confidence: float = Field(ge=0.0, le=1.0)
@@ -33,6 +40,7 @@ class DailyLivingEvent(BaseModel):
     patient_id: str
     features: list[float] = Field(default_factory=list)  # privacy-scrubbed; never raw audio
     baseline_deviation: float = Field(ge=0.0, le=1.0)
+    edge_assessed_level: Grade = "L0"  # the edge's OWN immediate decision
     edge_action_taken: EdgeActionTaken = "none"
     context: dict[str, Any] = Field(default_factory=dict)
 
@@ -46,23 +54,42 @@ class ReplyIntent(BaseModel):
 
 
 class CloudAction(BaseModel):
-    """A single action the cloud decision asks to be taken."""
+    """A caregiver notification the cloud sent (informational — recorded on the edge)."""
 
     channel: ActionChannel
     message: str
     target: str | None = None
 
 
-class EdgeDirective(BaseModel):
-    """Instruction the cloud sends back to the edge (e.g. an L1 voice prompt to speak)."""
+class CloudAssessment(BaseModel):
+    """Cloud's async, *considered* view of a reported event — never gates the edge.
 
-    voice_prompt: str | None = None
+    ``policy_version`` is the piggyback hint: if it exceeds the edge's current version,
+    the edge lazily fetches a new :class:`EdgePolicyUpdate`.
+    """
 
-
-class CloudDecision(BaseModel):
-    """Graded, explainable decision returned by the cloud (stub or Foundry)."""
-
-    grade: Grade
+    considered_level: Grade
     reason: str
-    actions: list[CloudAction] = Field(default_factory=list)
-    edge_directive: EdgeDirective = Field(default_factory=EdgeDirective)
+    caregiver_notifications: list[CloudAction] = Field(default_factory=list)
+    policy_version: int = 1
+    report_ref: str | None = None
+
+
+class EdgePolicyUpdate(BaseModel):
+    """Control-plane feedback: tunes how the edge behaves for FUTURE events.
+
+    Produced by the cloud's fusion / learning over accumulated events. Fetched lazily
+    when a report's ``CloudAssessment.policy_version`` exceeds the edge's current version.
+    """
+
+    version: int
+    issued_at: datetime = Field(default_factory=utcnow)
+    patient_id: str
+    wander_confidence: float | None = None
+    no_response_seconds: float | None = None
+    max_clarify_retries: int | None = None
+    confirm_prompt: str | None = None
+    reassure_prompt: str | None = None
+    clarify_prompt: str | None = None
+    disease_stage: DiseaseStage | None = None
+    notes: str | None = None

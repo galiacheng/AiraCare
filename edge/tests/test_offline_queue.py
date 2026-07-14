@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from airacare_edge.cloud.contracts import DailyLivingEvent
 from airacare_edge.cloud.queue import OfflineQueue
-from airacare_edge.cloud.stub import LocalStubCloudClient
+from airacare_edge.cloud.stub import LocalCloudStub
 
 T0 = datetime(2026, 7, 13, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -18,7 +18,8 @@ def _event(pid: str = "p-001") -> DailyLivingEvent:
         timestamp=T0,
         patient_id=pid,
         baseline_deviation=0.95,
-        edge_action_taken="local_alert",
+        edge_assessed_level="L3",
+        edge_action_taken="escalated",
         context={"response": "no_response"},
     )
 
@@ -38,19 +39,19 @@ def test_flush_online_sends_and_clears(tmp_path):
     q.enqueue(_event(), now=T0)
     q.enqueue(_event("p-002"), now=T0)
 
-    result = q.flush(LocalStubCloudClient(online=True), now=T0)
+    result = q.flush(LocalCloudStub(online=True), now=T0)
 
     assert result.sent_count == 2
     assert result.remaining == 0
     assert q.count() == 0
-    assert all(d.grade == "L3" for _, d in result.sent)
+    assert all(a.considered_level == "L3" for _, a in result.sent)
 
 
 def test_flush_offline_keeps_events(tmp_path):
     q = OfflineQueue(tmp_path / "q", ttl_seconds=3600)
     q.enqueue(_event(), now=T0)
 
-    result = q.flush(LocalStubCloudClient(online=False), now=T0)
+    result = q.flush(LocalCloudStub(online=False), now=T0)
 
     assert result.sent_count == 0
     assert result.remaining == 1
@@ -62,7 +63,7 @@ def test_flush_drops_expired(tmp_path):
     q.enqueue(_event(), now=T0)
 
     # Flush 2 minutes later -> event is expired and dropped (not sent).
-    result = q.flush(LocalStubCloudClient(online=True), now=T0 + timedelta(minutes=2))
+    result = q.flush(LocalCloudStub(online=True), now=T0 + timedelta(minutes=2))
 
     assert result.sent_count == 0
     assert result.expired == 1

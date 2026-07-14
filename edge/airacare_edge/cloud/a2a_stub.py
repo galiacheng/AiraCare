@@ -1,9 +1,10 @@
 """Local A2A stub server — stands in for the Foundry Hosted Agent.
 
 A tiny stdlib HTTP server that speaks the same JSON-RPC 2.0 / A2A-shaped envelope the
-real Foundry agent will. It grades an incoming DailyLivingEvent with the in-process
-LocalGradingEngine and returns a CloudDecision. Swapping to the real Foundry Hosted
-Agent means pointing the client at Foundry instead of this server — no edge changes.
+real Foundry agent will. It accepts an event *report* (`airacare.report`) and returns a
+CloudAssessment, and serves policy (`airacare.fetch_policy`) — both backed by the
+in-process LocalCloudStub. Swapping to the real Foundry Hosted Agent means pointing the
+client at Foundry instead of this server — no edge changes.
 
 Run standalone:
 
@@ -16,31 +17,31 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from airacare_edge.cloud.a2a_client import GRADE_METHOD
+from airacare_edge.cloud.a2a_client import FETCH_POLICY_METHOD, REPORT_METHOD
 from airacare_edge.cloud.contracts import DailyLivingEvent
-from airacare_edge.cloud.stub import LocalGradingEngine
+from airacare_edge.cloud.stub import LocalCloudStub
 
 
 class _Handler(BaseHTTPRequestHandler):
-    engine = LocalGradingEngine()
+    gateway = LocalCloudStub()
 
     def do_POST(self) -> None:  # noqa: N802 (http.server API)
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
         try:
             payload = json.loads(raw)
-            if payload.get("method") != GRADE_METHOD:
-                raise ValueError(f"unknown method: {payload.get('method')}")
-            event = DailyLivingEvent.model_validate(payload["params"]["event"])
-            decision = self.engine.grade(event)
-            self._send(
-                200,
-                {
-                    "jsonrpc": "2.0",
-                    "id": payload.get("id"),
-                    "result": json.loads(decision.model_dump_json()),
-                },
-            )
+            method = payload.get("method")
+            params = payload.get("params", {})
+            if method == REPORT_METHOD:
+                event = DailyLivingEvent.model_validate(params["event"])
+                assessment = self.gateway.report(event)
+                result = json.loads(assessment.model_dump_json()) if assessment else None
+            elif method == FETCH_POLICY_METHOD:
+                update = self.gateway.fetch_policy(params["patient_id"], params["since_version"])
+                result = json.loads(update.model_dump_json()) if update else None
+            else:
+                raise ValueError(f"unknown method: {method}")
+            self._send(200, {"jsonrpc": "2.0", "id": payload.get("id"), "result": result})
         except Exception as exc:  # noqa: BLE001 (stub boundary)
             self._send(400, {"jsonrpc": "2.0", "id": None, "error": {"message": str(exc)}})
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from airacare_edge.agent import EdgeAgent, VoiceService
-from airacare_edge.cloud.stub import LocalStubCloudClient
+from airacare_edge.cloud.stub import LocalCloudStub
 from airacare_edge.config import (
     EdgeConfig,
     PatientConfig,
@@ -55,7 +55,7 @@ def _agent(voice: VoiceService, retries: int = 1) -> EdgeAgent:
     return EdgeAgent(
         config=config,
         voice=voice,
-        cloud=LocalStubCloudClient(),
+        cloud=LocalCloudStub(),
         alerts=FakeAlerts(),
         classifier=classifier,
         clock=lambda: NIGHT,
@@ -69,7 +69,7 @@ def _clarified(voice: SequenceVoice) -> bool:
 def test_clarify_then_ok_reasks_once_and_grades_l1():
     voice = SequenceVoice(["ummm the thing over there", "I'm fine"])
     result = _agent(voice).handle_sensor_events(nighttime_wander_events(at=NIGHT))
-    assert result.cloud_decision.grade == "L1"
+    assert result.decision.level == "L1"
     assert _clarified(voice)  # the re-ask happened
 
 
@@ -77,7 +77,7 @@ def test_still_unclear_after_retry_grades_l2():
     voice = SequenceVoice(["ummm", "still confused"])
     result = _agent(voice).handle_sensor_events(nighttime_wander_events(at=NIGHT))
     assert result.event.context["response"] == "unclear"
-    assert result.cloud_decision.grade == "L2"
+    assert result.decision.level == "L2"
     assert _clarified(voice)
 
 
@@ -85,13 +85,13 @@ def test_clarify_then_silence_grades_l3():
     voice = SequenceVoice(["ummm", None])  # unclear, then no response on re-ask
     result = _agent(voice).handle_sensor_events(nighttime_wander_events(at=NIGHT))
     assert result.event.context["response"] == "no_response"
-    assert result.cloud_decision.grade == "L3"
+    assert result.decision.level == "L3"
 
 
 def test_distress_on_first_reply_does_not_reask():
     voice = SequenceVoice(["help me please"])
     result = _agent(voice).handle_sensor_events(nighttime_wander_events(at=NIGHT))
-    assert result.cloud_decision.grade == "L3"
+    assert result.decision.level == "L3"
     assert not _clarified(voice)
 
 
@@ -99,5 +99,5 @@ def test_zero_retries_escalates_immediately():
     voice = SequenceVoice(["ummm"])
     result = _agent(voice, retries=0).handle_sensor_events(nighttime_wander_events(at=NIGHT))
     assert result.event.context["response"] == "unclear"
-    assert result.cloud_decision.grade == "L2"
+    assert result.decision.level == "L2"
     assert not _clarified(voice)  # no re-ask when retries=0

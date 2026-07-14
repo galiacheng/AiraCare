@@ -2,10 +2,12 @@
 
 Orchestrates the flagship Nighttime Wandering flow:
 
-    sense -> classify -> active voice confirm -> build DailyLivingEvent
-          -> submit to cloud (A2A) -> act on graded decision
-          -> offline fallback if the cloud is unreachable
+    sense -> classify -> active voice confirm -> EDGE DECIDES (L0-L3) & ACTS NOW
+          -> build DailyLivingEvent (report of what happened + what the edge did)
+          -> report to cloud (fire-and-forget; offline -> store-and-forward queue)
+          -> apply an EdgePolicyUpdate lazily when the report's policy_version changed
 
+The edge is authoritative for the immediate action and **never waits for the cloud**.
 The core depends only on small service *protocols* (voice / cloud / alerts), so it runs
 deterministically in tests with fakes, and swaps to real implementations unchanged.
 """
@@ -17,14 +19,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Callable, Protocol, runtime_checkable
 
 from airacare_edge.cloud.contracts import (
-    CloudDecision,
+    CloudAssessment,
     DailyLivingEvent,
+    EdgePolicyUpdate,
     ReplyIntent,
     utcnow,
 )
 from airacare_edge.config import EdgeConfig
 from airacare_edge.reasoning.classifier import WanderClassifier
-from airacare_edge.reasoning.escalation import EscalationPolicy
+from airacare_edge.reasoning.grader import EdgeDecision, EdgeGrader
 from airacare_edge.sensors.events import RawSensorEvent
 
 if TYPE_CHECKING:
@@ -44,19 +47,24 @@ class VoiceService(Protocol):
 
 
 @runtime_checkable
-class CloudClient(Protocol):
-    """Submits an event and returns a graded decision (None if offline)."""
-
-    def submit(self, event: DailyLivingEvent) -> CloudDecision | None: ...
-
-
-@runtime_checkable
 class AlertSink(Protocol):
-    """Offline fallback outputs (local alarm + SMS to next of kin)."""
+    """The edge's own immediate actions (taken without waiting for the cloud)."""
 
     def local_alert(self, event: DailyLivingEvent, reason: str) -> None: ...
 
     def notify_kin_sms(self, event: DailyLivingEvent, reason: str) -> None: ...
+
+    def escalate(self, event: DailyLivingEvent, reason: str) -> None: ...
+
+
+@runtime_checkable
+class CloudGateway(Protocol):
+    """Async cloud channel: report an event, and fetch policy when it changed."""
+
+    def report(self, event: DailyLivingEvent) -> CloudAssessment | None:
+        """Fire-and-forget report; returns the considered assessment, or None if offline."""
+
+    def fetch_policy(self, patient_id: str, since_version: int) -> EdgePolicyUpdate | None: ...
 
 
 @dataclass
@@ -67,8 +75,10 @@ class FlowResult:
     path: str
     event: DailyLivingEvent | None = None
     reply: ReplyIntent | None = None
-    cloud_decision: CloudDecision | None = None
-    offline: bool = False
+    decision: EdgeDecision | None = None
+    assessment: CloudAssessment | None = None
+    reported: bool = False  # did the report reach the cloud (vs. queued offline)?
+    policy_applied_version: int | None = None
 
 
 class EdgeAgent:
@@ -76,21 +86,31 @@ class EdgeAgent:
         self,
         config: EdgeConfig,
         voice: VoiceService,
-        cloud: CloudClient,
+        cloud: CloudGateway,
         alerts: AlertSink,
         classifier: WanderClassifier,
-        escalation: EscalationPolicy | None = None,
+        grader: EdgeGrader | None = None,
         clock: Callable[[], datetime] = utcnow,
         queue: "OfflineQueue | None" = None,
+        policy_version: int = 1,
     ) -> None:
         self._config = config
         self._voice = voice
         self._cloud = cloud
         self._alerts = alerts
         self._classifier = classifier
-        self._escalation = escalation or EscalationPolicy()
+        self._grader = grader or EdgeGrader()
         self._clock = clock
         self._queue = queue
+        self._policy_version = policy_version
+
+    @property
+    def config(self) -> EdgeConfig:
+        return self._config
+
+    @property
+    def policy_version(self) -> int:
+        return self._policy_version
 
     def flush_offline_queue(self, now: datetime | None = None) -> "FlushResult | None":
         """Re-send any locally-persisted events (call when connectivity may be restored)."""
@@ -105,34 +125,91 @@ class EdgeAgent:
         if candidate is None or candidate.confidence < self._config.thresholds.wander_confidence:
             return FlowResult(handled=False, path="below_threshold", event=candidate)
 
-        # Active voice confirmation with a bounded clarify loop (L1 first response).
+        # 1) Active voice confirmation (bounded clarify loop).
         intent = self._active_confirm()
 
-        decision = self._escalation.decide(intent, prompted=True)
+        # 2) EDGE DECIDES and ACTS NOW — never waits for the cloud.
+        decision = self._grader.decide(intent, reassure_prompt=self._config.voice.reassure_prompt)
+        self._act(decision, candidate)
+
+        # 3) Build the report of what happened + what the edge did.
         event = candidate.model_copy(
             update={
-                "edge_action_taken": decision.edge_action_taken,
+                "edge_assessed_level": decision.level,
+                "edge_action_taken": decision.action,
                 "context": {**candidate.context, "response": intent.status},
             }
         )
 
-        cloud_decision = self._cloud.submit(event) if decision.escalate_to_cloud else None
-        if cloud_decision is None:
-            return self._offline_fallback(event, intent)
-
-        # Act on the graded decision (L1 loops a voice prompt back to the edge).
-        if cloud_decision.edge_directive.voice_prompt:
-            self._voice.say(cloud_decision.edge_directive.voice_prompt)
+        # 4) Report to the cloud (fire-and-forget). Offline -> store-and-forward.
+        assessment = self._cloud.report(event)
+        reported = assessment is not None
+        applied_version: int | None = None
+        if not reported:
+            if self._queue is not None:
+                self._queue.enqueue(event, now=now)
+        else:
+            applied_version = self._maybe_apply_policy(assessment)
 
         return FlowResult(
             handled=True,
-            path=f"cloud_{cloud_decision.grade}",
+            path=f"edge_{decision.level}",
             event=event,
             reply=intent,
-            cloud_decision=cloud_decision,
-            offline=False,
+            decision=decision,
+            assessment=assessment,
+            reported=reported,
+            policy_applied_version=applied_version,
         )
 
+    # --- edge actions (immediate) -------------------------------------------
+    def _act(self, decision: EdgeDecision, event: DailyLivingEvent) -> None:
+        if decision.action == "reassured":
+            if decision.voice_prompt:
+                self._voice.say(decision.voice_prompt)
+        elif decision.action == "local_alert":
+            self._alerts.local_alert(event, decision.reason)
+            self._alerts.notify_kin_sms(event, decision.reason)
+        elif decision.action == "escalated":
+            self._alerts.escalate(event, decision.reason)
+        # "none" -> nothing (L0 log)
+
+    # --- policy (piggyback) --------------------------------------------------
+    def _maybe_apply_policy(self, assessment: CloudAssessment | None) -> int | None:
+        if assessment is None or assessment.policy_version <= self._policy_version:
+            return None
+        update = self._cloud.fetch_policy(self._config.patient.id, self._policy_version)
+        if update is None:
+            return None
+        self._apply_policy(update)
+        return update.version
+
+    def _apply_policy(self, update: EdgePolicyUpdate) -> None:
+        voice_updates: dict[str, object] = {}
+        for field in ("max_clarify_retries", "confirm_prompt", "reassure_prompt", "clarify_prompt"):
+            value = getattr(update, field)
+            if value is not None:
+                voice_updates[field] = value
+        threshold_updates: dict[str, object] = {}
+        for field in ("wander_confidence", "no_response_seconds"):
+            value = getattr(update, field)
+            if value is not None:
+                threshold_updates[field] = value
+
+        config_updates: dict[str, object] = {}
+        if voice_updates:
+            config_updates["voice"] = self._config.voice.model_copy(update=voice_updates)
+        if threshold_updates:
+            config_updates["thresholds"] = self._config.thresholds.model_copy(update=threshold_updates)
+        if update.disease_stage is not None:
+            config_updates["patient"] = self._config.patient.model_copy(
+                update={"disease_stage": update.disease_stage}
+            )
+        if config_updates:
+            self._config = self._config.model_copy(update=config_updates)
+        self._policy_version = update.version
+
+    # --- voice confirmation --------------------------------------------------
     def _resolve_intent(self, transcript: str | None) -> ReplyIntent:
         if transcript is None:
             return ReplyIntent(status="no_response", urgency=0.9, transcript=None)
@@ -154,28 +231,7 @@ class EdgeAgent:
             if intent.status != "unclear" or attempt >= max_retries:
                 return intent
             attempt += 1
-            prompt = self._clarify_prompt()
-
-    def _offline_fallback(self, event: DailyLivingEvent, intent: ReplyIntent) -> FlowResult:
-        # Escalate the edge action to a local alert since the cloud is unreachable.
-        offline_event = event.model_copy(update={"edge_action_taken": "local_alert"})
-        reason = "offline: cloud unreachable"
-        self._alerts.local_alert(offline_event, reason)
-        self._alerts.notify_kin_sms(offline_event, reason)
-        # Persist for store-and-forward: re-sent to the cloud once connectivity returns.
-        if self._queue is not None:
-            self._queue.enqueue(offline_event, now=self._clock())
-        return FlowResult(
-            handled=True,
-            path="offline_fallback",
-            event=offline_event,
-            reply=intent,
-            cloud_decision=None,
-            offline=True,
-        )
+            prompt = self._config.voice.clarify_prompt
 
     def _confirm_prompt(self) -> str:
-        return f"{self._config.patient.name}, are you okay?"
-
-    def _clarify_prompt(self) -> str:
-        return "I didn't catch that. Are you okay?"
+        return self._config.voice.confirm_prompt.format(name=self._config.patient.name)

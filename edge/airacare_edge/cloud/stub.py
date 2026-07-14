@@ -1,91 +1,66 @@
-"""In-process cloud stub: a local grading engine that speaks the CloudDecision contract.
+"""In-process cloud stub — a Foundry stand-in that speaks the async gateway contract.
 
-This mirrors what the Foundry Hosted Agent will return, so the whole Edge->Cloud->Edge
-loop runs deterministically with no network. Step 3 wraps this engine behind an A2A
-endpoint; the real Foundry agent then drops in by changing config only.
+It receives an event *report* (the edge has already acted), returns a considered
+:class:`CloudAssessment` (with a ``policy_version`` piggyback hint), and can hand out an
+:class:`EdgePolicyUpdate` via ``fetch_policy``. The A2A stub server wraps this; the real
+Foundry agent drops in by changing config only.
 """
 
 from __future__ import annotations
 
 from airacare_edge.cloud.contracts import (
     CloudAction,
-    CloudDecision,
+    CloudAssessment,
     DailyLivingEvent,
-    EdgeDirective,
+    EdgePolicyUpdate,
 )
 
 
-class LocalGradingEngine:
-    """Deterministic grading rules approximating the Foundry decision engine."""
+class LocalCloudStub:
+    """In-process CloudGateway: report -> CloudAssessment; fetch_policy -> EdgePolicyUpdate.
 
-    def grade(self, event: DailyLivingEvent) -> CloudDecision:
-        if event.type == "wander":
-            return self._grade_wander(event)
-        # Fallback for other (future) event types.
-        return CloudDecision(grade="L0", reason=f"{event.type} logged", actions=[
-            CloudAction(channel="log", message=f"{event.type} event logged"),
-        ])
-
-    def _grade_wander(self, event: DailyLivingEvent) -> CloudDecision:
-        response = str(event.context.get("response", "pending"))
-        night = event.context.get("time_of_day") == "night"
-
-        if response in ("no_response", "distress"):
-            return CloudDecision(
-                grade="L3",
-                reason=(
-                    "out-of-bed + door open"
-                    + (" at night" if night else "")
-                    + f" + response={response} + baseline_deviation={event.baseline_deviation:.2f}"
-                    " -> high wandering risk"
-                ),
-                actions=[
-                    CloudAction(
-                        channel="family",
-                        message="Patient left the bedroom and did not respond. Please check immediately.",
-                    ),
-                    CloudAction(
-                        channel="community",
-                        message="Escalate if family does not acknowledge.",
-                        target="community-watch",
-                    ),
-                ],
-            )
-
-        if response == "unclear":
-            return CloudDecision(
-                grade="L2",
-                reason="wander candidate with unclear response -> notify family to check",
-                actions=[
-                    CloudAction(
-                        channel="family",
-                        message="Possible nighttime wandering; please check on the patient.",
-                    ),
-                ],
-            )
-
-        # response == "ok" (patient reassured us)
-        return CloudDecision(
-            grade="L1",
-            reason="patient responded and is okay -> gentle guidance back to bed",
-            edge_directive=EdgeDirective(
-                voice_prompt="It's late. Let's head back to bed — I'll leave a soft light on.",
-            ),
-        )
-
-
-class LocalStubCloudClient:
-    """CloudClient implementation backed by the in-process grading engine.
-
-    ``online`` can be toggled to simulate loss of connectivity (the edge then falls
-    back to local alerts).
+    ``online`` toggles connectivity (offline ⇒ report returns None ⇒ the edge queues it;
+    the edge has already taken its own action regardless). ``policy`` + ``policy_version``
+    let a test/demo simulate the cloud learning a new policy the edge then pulls.
     """
 
-    def __init__(self, engine: LocalGradingEngine | None = None, *, online: bool = True) -> None:
-        self._engine = engine or LocalGradingEngine()
+    def __init__(
+        self,
+        *,
+        online: bool = True,
+        policy: EdgePolicyUpdate | None = None,
+        policy_version: int = 1,
+    ) -> None:
         self.online = online
+        self._policy = policy
+        self._policy_version = policy.version if policy is not None else policy_version
 
-    def submit(self, event: DailyLivingEvent) -> CloudDecision | None:
+    def report(self, event: DailyLivingEvent) -> CloudAssessment | None:
         if not self.online:
             return None
-        return self._engine.grade(event)
+        # The cloud's *considered* view. For the stub it mirrors the edge's level and
+        # attaches the caregiver comms it would send.
+        notifications: list[CloudAction] = []
+        if event.edge_assessed_level in ("L2", "L3"):
+            notifications.append(
+                CloudAction(channel="family", message="Please check on the patient.")
+            )
+        if event.edge_assessed_level == "L3":
+            notifications.append(
+                CloudAction(channel="community", message="Escalate if no acknowledgement.")
+            )
+        return CloudAssessment(
+            considered_level=event.edge_assessed_level,
+            reason=(
+                f"considered {event.edge_assessed_level} for {event.type}"
+                f" (response={event.context.get('response')},"
+                f" baseline_deviation={event.baseline_deviation:.2f})"
+            ),
+            caregiver_notifications=notifications,
+            policy_version=self._policy_version,
+        )
+
+    def fetch_policy(self, patient_id: str, since_version: int) -> EdgePolicyUpdate | None:
+        if self._policy is not None and self._policy.version > since_version:
+            return self._policy
+        return None

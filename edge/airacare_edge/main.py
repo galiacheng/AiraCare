@@ -1,7 +1,7 @@
 """Scripted console demo of the flagship flow — no mic, no LLM, no network.
 
-Uses the local grading stub and a console voice that simulates a no-response, so you can
-watch the full Edge -> Cloud -> Edge loop and the privacy boundary in the terminal:
+Uses the local cloud stub and a console voice that simulates a no-response, so you can
+watch the edge decide + act, then report to the cloud, in the terminal:
 
     python -m airacare_edge.main
 """
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from airacare_edge.agent import AlertSink, EdgeAgent, VoiceService
 from airacare_edge.cloud.contracts import DailyLivingEvent, ReplyIntent
-from airacare_edge.cloud.stub import LocalStubCloudClient
+from airacare_edge.cloud.stub import LocalCloudStub
 from airacare_edge.config import EdgeConfig
 from airacare_edge.reasoning.baseline import BaselineTracker
 from airacare_edge.reasoning.classifier import WanderClassifier
@@ -48,17 +48,20 @@ class ConsoleAlerts(AlertSink):
     def notify_kin_sms(self, event: DailyLivingEvent, reason: str) -> None:
         print(f"  📩 SMS to next of kin ({reason})")
 
+    def escalate(self, event: DailyLivingEvent, reason: str) -> None:
+        print(f"  🆘 ESCALATE ({reason}): alarm + SMS + community/emergency")
+
 
 def _run(config: EdgeConfig) -> None:
     baseline = BaselineTracker(config.quiet_hours)
     classifier = WanderClassifier(baseline, config.thresholds.correlation_window_seconds)
-    cloud = LocalStubCloudClient(online=True)
+    cloud = LocalCloudStub(online=True)
 
     # Force a 3:00 AM timestamp so the scenario is unambiguously nighttime.
     night = datetime(2026, 7, 13, 3, 0, 0, tzinfo=timezone.utc)
     agent = EdgeAgent(
         config=config,
-        voice=ConsoleVoice(scripted_reply=None),  # None => no response => L3
+        voice=ConsoleVoice(scripted_reply=None),  # None => no response => edge L3
         cloud=cloud,
         alerts=ConsoleAlerts(),
         classifier=classifier,
@@ -71,17 +74,21 @@ def _run(config: EdgeConfig) -> None:
 
     result = agent.handle_sensor_events(events)
 
-    print("\n--- edge decision ---")
-    print(f"  handled={result.handled} path={result.path} offline={result.offline}")
+    print("\n--- edge decision (authoritative — acted immediately) ---")
+    if result.decision is not None:
+        print(f"  level={result.decision.level} action={result.decision.action} reason={result.decision.reason}")
+    print(f"  handled={result.handled} path={result.path} reported={result.reported}")
     if result.event is not None:
-        print("\n--- 🔒 ONLY this crosses the boundary (DailyLivingEvent) ---")
+        print("\n--- 🔒 ONLY this crosses the boundary (DailyLivingEvent report) ---")
         print(json.dumps(json.loads(result.event.model_dump_json()), indent=2))
-    if result.cloud_decision is not None:
-        print("\n--- cloud decision ---")
-        print(f"  grade={result.cloud_decision.grade}")
-        print(f"  reason={result.cloud_decision.reason}")
-        for action in result.cloud_decision.actions:
-            print(f"  action: [{action.channel}] {action.message}")
+    if result.assessment is not None:
+        print("\n--- cloud assessment (async · considered) ---")
+        print(f"  considered_level={result.assessment.considered_level} policy_version={result.assessment.policy_version}")
+        print(f"  reason={result.assessment.reason}")
+        for action in result.assessment.caregiver_notifications:
+            print(f"  cloud sent: [{action.channel}] {action.message}")
+    else:
+        print("\n--- cloud: OFFLINE — report queued (edge already acted) ---")
     print()
 
 

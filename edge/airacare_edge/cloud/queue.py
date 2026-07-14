@@ -17,13 +17,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from airacare_edge.agent import CloudClient
-from airacare_edge.cloud.contracts import CloudDecision, DailyLivingEvent, utcnow
+from airacare_edge.agent import CloudGateway
+from airacare_edge.cloud.contracts import CloudAssessment, DailyLivingEvent, utcnow
 
 
 @dataclass
 class FlushResult:
-    sent: list[tuple[DailyLivingEvent, CloudDecision]] = field(default_factory=list)
+    sent: list[tuple[DailyLivingEvent, CloudAssessment]] = field(default_factory=list)
     expired: int = 0
     remaining: int = 0
 
@@ -64,7 +64,7 @@ class OfflineQueue:
                 continue
         return items
 
-    def flush(self, client: CloudClient, now: datetime | None = None) -> FlushResult:
+    def flush(self, client: CloudGateway, now: datetime | None = None) -> FlushResult:
         """Re-send pending events oldest-first; drop expired; stop if still offline."""
         moment = now or utcnow()
         result = FlushResult()
@@ -75,10 +75,10 @@ class OfflineQueue:
                 result.expired += 1
                 continue
             event = DailyLivingEvent.model_validate(record["event"])
-            decision = client.submit(event)
-            if decision is None:
+            assessment = client.report(event)
+            if assessment is None:
                 break  # still offline — keep this and the rest for next time
             path.unlink(missing_ok=True)
-            result.sent.append((event, decision))
+            result.sent.append((event, assessment))
         result.remaining = self.count()
         return result

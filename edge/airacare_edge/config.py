@@ -37,6 +37,10 @@ class VoiceConfig(BaseModel):
     sample_rate: int = 16000
     silence_seconds: float = 1.2  # trailing silence that ends an utterance
     energy_threshold: float = 0.02  # RMS threshold for the energy VAD
+    # Edge-owned prompts (personalized via EdgePolicyUpdate). confirm supports {name}.
+    confirm_prompt: str = "{name}, are you okay?"
+    reassure_prompt: str = "It's late. Let's head back to bed — I'll leave a soft light on."
+    clarify_prompt: str = "I didn't catch that. Are you okay?"
 
 
 class CloudConfig(BaseModel):

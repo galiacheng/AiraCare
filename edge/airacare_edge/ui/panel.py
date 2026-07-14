@@ -1,9 +1,9 @@
 """Split-screen demo panel: EDGE (in-home) vs FOUNDRY (cloud), with the privacy boundary.
 
 Renders the flagship flow so judges can see the three anchors at a glance:
-  - division of labor (edge does sensing/voice/first-response; cloud does grading)
-  - the privacy boundary (ONLY the DailyLivingEvent crosses; raw audio discarded)
-  - graded escalation (L0-L3 with an explainable reason)
+  - division of labor (edge decides + acts immediately; cloud does async assessment)
+  - the privacy boundary (ONLY the DailyLivingEvent report crosses; raw audio discarded)
+  - graded escalation (edge L0-L3, authoritative, never waits for the cloud)
 """
 
 from __future__ import annotations
@@ -38,11 +38,16 @@ def _edge_body(result: FlowResult, sensors: list[str], provenance: dict[str, Any
         else:
             lines.append(f"[bold]🧠 Understanding[/bold]: keyword=[b]{provenance.get('keyword')}[/b] (LLM not called)")
 
+    if result.decision is not None:
+        style = _GRADE_STYLE.get(result.decision.level, "white")
+        lines.append(
+            f"[bold]⚖ Edge decision[/bold]: [{style}]{result.decision.level}[/{style}] "
+            f"→ [b]{result.decision.action}[/b]  [dim](acted now — no cloud wait)[/dim]"
+        )
     if result.event is not None:
         ev = result.event
-        lines.append(f"[bold]⚖ Edge action[/bold]: {ev.edge_action_taken}")
         lines.append(
-            f"[bold]📦 Local decision[/bold]: {ev.type} "
+            f"[bold]📦 Event[/bold]: {ev.type} "
             f"(conf {ev.confidence:.2f}, drift {ev.baseline_deviation:.2f})"
         )
 
@@ -54,23 +59,23 @@ def _edge_body(result: FlowResult, sensors: list[str], provenance: dict[str, Any
 
 
 def _cloud_body(result: FlowResult) -> str:
-    if result.offline or result.cloud_decision is None:
+    if not result.reported or result.assessment is None:
         return (
-            "[bold red]⚠ OFFLINE[/bold red] — cloud unreachable\n\n"
-            "Edge fell back locally:\n"
-            "  🚨 local alert (light + sound)\n"
-            "  📩 SMS to next of kin"
+            "[bold red]⚠ OFFLINE[/bold red] — report queued (store-and-forward)\n\n"
+            "The edge [b]already acted[/b] on its own decision;\n"
+            "the report will re-sync when connectivity returns."
         )
-    decision = result.cloud_decision
-    style = _GRADE_STYLE.get(decision.grade, "white")
-    lines = [f"[bold]Grade[/bold]: [{style}]{decision.grade}[/{style}]"]
-    lines.append(f"[bold]Reason[/bold]: {decision.reason}")
-    if decision.actions:
-        lines.append("[bold]Actions[/bold]:")
-        for action in decision.actions:
+    a = result.assessment
+    style = _GRADE_STYLE.get(a.considered_level, "white")
+    lines = [f"[bold]Considered level[/bold]: [{style}]{a.considered_level}[/{style}]"]
+    lines.append(f"[bold]Reason[/bold]: {a.reason}")
+    lines.append(f"[bold]Policy version[/bold]: {a.policy_version}")
+    if result.policy_applied_version is not None:
+        lines.append(f"[bold green]↺ EdgePolicyUpdate applied → v{result.policy_applied_version}[/bold green]")
+    if a.caregiver_notifications:
+        lines.append("[bold]Cloud sent[/bold]:")
+        for action in a.caregiver_notifications:
             lines.append(f"  [{action.channel}] {action.message}")
-    if decision.edge_directive.voice_prompt:
-        lines.append(f"[bold]↩ Voice back to edge[/bold]: \"{decision.edge_directive.voice_prompt}\"")
     return "\n".join(lines)
 
 
@@ -90,15 +95,15 @@ def render_split(
     console.print(Rule("[bold]AiraCare — Nighttime Wandering[/bold]"))
     edge = Panel(
         _edge_body(result, sensors, provenance, features),
-        title="🏠 EDGE — in the home",
+        title="🏠 EDGE — decides & acts (authoritative)",
         subtitle="private · real-time · offline-capable",
         border_style="blue",
     )
     cloud = Panel(
         _cloud_body(result),
-        title=f"☁ FOUNDRY — cloud · {cloud_mode}",
-        subtitle="deep reasoning · graded",
-        border_style="green" if not result.offline else "red",
+        title=f"☁ FOUNDRY — cloud (async) · {cloud_mode}",
+        subtitle="considered assessment · policy",
+        border_style="green" if result.reported else "red",
     )
     # Table.grid forces a true side-by-side split (wraps content inside each column).
     grid = Table.grid(expand=True, padding=(0, 1))
@@ -113,7 +118,7 @@ def render_split(
     if result.event is not None and result.handled:
         payload = json.dumps(json.loads(result.event.model_dump_json()), indent=2)
         console.print(
-            Panel(payload, title="🔒 What crossed the boundary — DailyLivingEvent", border_style="red")
+            Panel(payload, title="🔒 What crossed the boundary — DailyLivingEvent (report)", border_style="red")
         )
 
 

@@ -1,1 +1,1 @@
-"""Reasoning subpackage: rule-based baseline, classification, and escalation."""
+"""Reasoning subpackage: rule-based baseline, classification, and graded decision."""
