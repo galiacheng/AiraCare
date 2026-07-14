@@ -30,8 +30,15 @@ recording endpoint (verified), so live mic/speaker work for a normal app.
   *structurally impossible* to attach raw audio to the uplink.
 - **Deterministic core, LLM at the edges:** the sense→classify→escalate decision is
   rule-based (reliable for a live demo); the LLM only interprets the spoken reply.
-- **Offline-first:** the edge completes its safety job with no network; the cloud is
-  an *enhancement*. A local queue + fallback prove the "cable-pull" independence.
+- **Edge decides and acts autonomously:** the edge **self-determines the immediate graded
+  response** (L0 log · L1 reassure · L2 local alert + SMS · L3 escalate) and acts on it
+  **immediately** — it **never waits for the cloud**. The cloud's analysis is asynchronous
+  and affects records, caregiver enrichment, and *future* policy, not the current action.
+  (Critical for an Alzheimer's patient: silence/confusion is itself a risk signal — the
+  safe default is act-now, bias-to-escalate.)
+- **Offline-first:** the edge completes its safety job with no network; reporting to the
+  cloud is fire-and-forget with store-and-forward. A local queue + fallback prove the
+  "cable-pull" independence.
 - **A2A drop-in:** the local stub speaks the same message contract as the real Foundry
   agent; switching is an endpoint/credential change.
 
@@ -79,60 +86,104 @@ edge/
 
 ## 4. Wandering flow — state machine
 
+The edge **decides and acts on its own**; reporting to the cloud is asynchronous and
+never gates the action.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
     Idle --> Detecting: sensor event (out_of_bed / door_open)
     Detecting --> Classify: correlate + nighttime + baseline drift
+    Classify --> Idle: below threshold (log L0)
     Classify --> ActiveConfirm: type=wander, confidence >= threshold
-    Classify --> Idle: below threshold (L0 log)
 
     ActiveConfirm --> Listening: TTS "are you okay?"
     Listening --> Interpret: speech captured (ASR)
     Listening --> NoResponse: VAD timeout
 
-    Interpret --> Reassure: reply = ok (fast-path / LLM)
-    Interpret --> Escalate: reply = distress / unclear
+    Interpret --> Reassure: reply = ok
+    Interpret --> Escalate: reply = distress (or unclear after clarify)
     NoResponse --> Escalate
 
-    Reassure --> Upload
-    Escalate --> Upload
-    Upload --> AwaitCloud: submit DailyLivingEvent (A2A)
-    AwaitCloud --> Act: cloud grade (L1/L2/L3) + reason
-    AwaitCloud --> Fallback: offline / no ack
-    Act --> Idle
-    Fallback --> Idle: local alert + SMS stub
+    Reassure --> Report: edge L1 - speak guidance locally
+    Escalate --> Report: edge L2/L3 - local alert + SMS (+ community/emergency)
+    Report --> Idle: report event + edge action to cloud (async, store-and-forward)
+
+    note right of Escalate
+        Edge acts NOW - never waits for the cloud.
+        Cloud analysis is asynchronous.
+    end note
 ```
+
+> A separate **async control-plane loop** applies an `EdgePolicyUpdate` from the cloud
+> (thresholds, quiet-hours, personalized prompts, geofence, disease-stage) to **future**
+> events. It is not part of the per-event flow above.
 
 ## 5. Contracts
 
 ```jsonc
-// Edge → Cloud (only this crosses the boundary)
+// Edge → Cloud — a REPORT of what the edge saw AND already did (fire-and-forget).
+// Only this crosses the boundary; raw audio/video never does.
 DailyLivingEvent {
   "type": "wander",
   "confidence": 0.9,
   "timestamp": "2026-07-13T03:00:12Z",
   "patient_id": "p-001",
-  "features": [],                 // privacy-scrubbed; never raw audio
+  "features": [],                       // privacy-scrubbed; never raw audio
   "baseline_deviation": 0.95,
-  "edge_action_taken": "prompted",
+  "edge_assessed_level": "L3",          // the edge's OWN immediate decision
+  "edge_action_taken": "escalated",     // none | reassured | local_alert | escalated
   "context": { "time_of_day": "night", "door_open": true, "response": "no_response" }
 }
 
-// Cloud → Edge (A2A response)
-CloudDecision {
-  "grade": "L3",
-  "reason": "out-of-bed + door open at night + no response + moderate stage → high wandering risk",
-  "actions": [ { "channel": "family", "message": "..." }, { "channel": "community", "message": "..." } ],
-  "edge_directive": { "voice_prompt": null }   // L1 carries a prompt to loop back to the edge
+// Cloud → Edge (async ack) — a CONSIDERED assessment for records + caregiver comms.
+// NOT an action the edge waits on; the edge has already acted.
+CloudAssessment {
+  "considered_level": "L3",
+  "reason": "3rd nighttime wander this week + moderate stage → escalating pattern",
+  "caregiver_notifications_sent": [ { "channel": "family", "message": "..." } ],
+  "policy_version": 7,                  // PIGGYBACK HINT — latest policy the cloud has
+  "report_ref": "daily/2026-07-13"
+}
+
+// Cloud → Edge (async control plane) — updates how the edge behaves for FUTURE events.
+// Produced by the cloud's fusion / multi-agent learning over accumulated events.
+EdgePolicyUpdate {
+  "version": 7,
+  "issued_at": "2026-07-13T09:00:00Z",
+  "patient_id": "p-001",
+  "thresholds": { "wander_confidence": 0.6, "no_response_seconds": 10 },
+  "quiet_hours": { "start": "21:30", "end": "07:00" },
+  "voice_prompts": { "reassure": "It's late, Grandpa. Let's go back to bed." },
+  "geofence": { "radius_m": 50 },
+  "disease_stage": "moderate",
+  "notes": "night wandering increasing → lowered threshold + earlier quiet hours"
 }
 ```
+
+**Direction of authority:** `DailyLivingEvent` is a **report** of what the edge saw *and
+did* — not a request for permission. `CloudAssessment` is the cloud's *considered* view
+(for records + caregiver comms), returned asynchronously and **never gating** the edge's
+action. `EdgePolicyUpdate` is the cloud's control-plane feedback — the edge validates and
+applies it (versioned) to **future** events.
+
+**Policy delivery = piggyback hint (not per-event):** a policy change is the product of
+fusion over *many* events, so it is **not** returned on every report. Instead, each
+`CloudAssessment` carries a lightweight `policy_version`. The edge compares it to its
+current version and **lazily pulls** a full `EdgePolicyUpdate` (`fetch_policy(patient_id,
+since_version)`) **only when it changed** — near-immediate propagation, no blind polling,
+no full policy on every event. Offline, the edge keeps using its last-applied policy.
 
 ## 6. Service boundaries (protocols — enable testing + swapping)
 
 - `VoiceService`: `say(text)`, `listen(timeout) -> transcript | None`, `interpret(transcript) -> ReplyIntent`
-- `CloudClient`: `submit(event) -> CloudDecision | None` (None ⇒ offline)
-- `AlertSink`: `local_alert(...)`, `notify_kin_sms(...)`
+- `AlertSink`: `local_alert(...)`, `notify_kin_sms(...)`, `escalate(...)` — the edge's own
+  immediate actions
+- `CloudClient`: `report(event) -> CloudAssessment | None` — **fire-and-forget** report;
+  `None` ⇒ offline, so the event is queued for store-and-forward. The edge has **already
+  acted** before it reports; it never blocks on the response.
+- `PolicyClient`: `fetch_policy(patient_id, since_version) -> EdgePolicyUpdate | None` —
+  async control-plane; the edge applies the update to future events.
 
 The fake/stub implementations let the whole flow run deterministically with no mic, no
 Ollama, and no network (used throughout the tests).
