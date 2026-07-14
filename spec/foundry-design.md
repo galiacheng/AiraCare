@@ -53,8 +53,8 @@ patient-facing action, which already happened on the edge.
   emergency) and enriches caregiver comms with fused history — it has the contact
   directory and the escalation timers.
 - **Feedback as policy, not commands.** The cloud never micromanages a single event; its
-  learning is distilled into an **`EdgePolicyUpdate`** (thresholds, quiet-hours, prompts,
-  geofence, disease-stage) delivered lazily via the `policy_version` piggyback hint.
+  learning is distilled into an **`EdgePolicyUpdate`** (thresholds, clarify retries,
+  personalized prompts, disease-stage) delivered lazily via the `policy_version` piggyback hint.
 - **Privacy boundary is inherited and absolute.** Only `DailyLivingEvent` crosses;
   everything the cloud stores is **derived** from it. No raw audio/video/point-cloud is
   persisted anywhere, edge or cloud.

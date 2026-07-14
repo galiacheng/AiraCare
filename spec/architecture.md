@@ -48,7 +48,7 @@ This is not "hybrid for the sake of hybrid" — the solution is impossible witho
 | Enterprise knowledge | Care guidelines / disease-progression knowledge base for advice |
 | **Multi-agent orchestration** | Monitoring / Companion / Cognitive-trend / Briefing sub-agents |
 | Toolboxes / Skills / Hosted Agents | Notification tool, geofence tool, daily-report Skill |
-| **Edge policy / learning feedback** | Fusion/learning → **EdgePolicyUpdate** (thresholds, quiet-hours, prompts, geofence) applied by the edge for future events |
+| **Edge policy / learning feedback** | Fusion/learning → **EdgePolicyUpdate** (thresholds, clarify retries, personalized prompts, disease-stage) applied by the edge for future events |
 | **Complex multi-modal understanding** | Fuses radar + acoustic + behavior + voice cognitive trends |
 
 **Multi-modal bonus:** Edge does real-time acoustic event detection on the voice
@@ -74,7 +74,7 @@ batch trend modeling.
 ║         L0 log · L1 reassure (voice) · L2 local alert + SMS · L3 escalate (+community/120)║
 ║    6. Report to cloud (async · store-and-forward)                                       ║
 ║                                                                                         ║
-║  ▲ applies EdgePolicyUpdate (async) → thresholds · quiet-hours · prompts · geofence     ║
+║  ▲ applies EdgePolicyUpdate (async) → thresholds · prompts · disease-stage · retries    ║
 ╚════╪════════════════════════════════════════════════════════════════════════════════════╝
      │ ▲ EdgePolicyUpdate  (policy feedback — tunes FUTURE events)
      ▼ │
@@ -139,8 +139,8 @@ back to the edge — tuning future behavior, never gating the current action.
    daily, clinician monthly) + enriched caregiver notifications. Store-and-forward when
    offline.
 3. **Policy / learning loop (Foundry → Edge · async control plane):** the cloud's fusion +
-   multi-agent learning produces an **EdgePolicyUpdate** (thresholds, quiet hours,
-   geofence, personalized prompts, disease stage) that the edge applies to **future**
+   multi-agent learning produces an **EdgePolicyUpdate** (thresholds, clarify retries,
+   personalized prompts, disease stage) that the edge applies to **future**
    events. Delivery is a **piggyback hint** — each report's `CloudAssessment` carries a
    `policy_version`, and the edge lazily pulls a new `EdgePolicyUpdate` only when it
    changes (no per-event policy, no blind polling). One capture serves both caregiver

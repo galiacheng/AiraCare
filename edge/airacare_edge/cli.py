@@ -111,12 +111,13 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
         return
 
     reported = outcome.reported if outcome else False
+    dispatch_note = " (report sent async)" if result.dispatched else ""
     print(f"\n=== AiraCare edge — scenario '{scenario}' (cloud={config.cloud.mode}, voice={voice_mode}) ===")
     print(f"  🛰️ sensors: {[e.kind for e in events]} @ {NIGHT.isoformat()}")
     print("\n--- edge decision (authoritative — acted immediately) ---")
     if result.decision is not None:
         print(f"  level={result.decision.level} action={result.decision.action} reason={result.decision.reason}")
-    print(f"  handled={result.handled} path={result.path} reported={reported} (report sent async)")
+    print(f"  handled={result.handled} path={result.path} reported={reported}{dispatch_note}")
     if result.event is not None and result.handled:
         print("\n--- 🔒 ONLY this crosses the boundary (DailyLivingEvent report) ---")
         print(json.dumps(json.loads(result.event.model_dump_json()), indent=2))
@@ -126,7 +127,7 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
         print(f"  reason={outcome.assessment.reason}")
         for action in outcome.assessment.caregiver_notifications:
             print(f"  cloud sent: [{action.channel}] {action.message}")
-    else:
+    elif result.dispatched:
         print("\n--- cloud: OFFLINE — report queued (edge already acted) ---")
     print()
 

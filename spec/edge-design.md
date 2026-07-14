@@ -122,7 +122,7 @@ stateDiagram-v2
 ```
 
 > A separate **async control-plane loop** applies an `EdgePolicyUpdate` from the cloud
-> (thresholds, quiet-hours, personalized prompts, geofence, disease-stage) to **future**
+> (thresholds, clarify retries, personalized prompts, disease-stage) to **future**
 > events. It is not part of the per-event flow above.
 
 **Edge ↔ cloud interaction (asynchronous — off the FSM).** The state machine above stays
@@ -176,23 +176,26 @@ DailyLivingEvent {
 CloudAssessment {
   "considered_level": "L3",
   "reason": "3rd nighttime wander this week + moderate stage → escalating pattern",
-  "caregiver_notifications_sent": [ { "channel": "family", "message": "..." } ],
+  "caregiver_notifications": [ { "channel": "family", "message": "...", "target": null } ],
   "policy_version": 7,                  // PIGGYBACK HINT — latest policy the cloud has
   "report_ref": "daily/2026-07-13"
 }
 
 // Cloud → Edge (async control plane) — updates how the edge behaves for FUTURE events.
 // Produced by the cloud's fusion / multi-agent learning over accumulated events.
+// Flat, optional fields (null = unchanged); matches airacare_edge/cloud/contracts.py.
 EdgePolicyUpdate {
   "version": 7,
   "issued_at": "2026-07-13T09:00:00Z",
   "patient_id": "p-001",
-  "thresholds": { "wander_confidence": 0.6, "no_response_seconds": 10 },
-  "quiet_hours": { "start": "21:30", "end": "07:00" },
-  "voice_prompts": { "reassure": "It's late, Grandpa. Let's go back to bed." },
-  "geofence": { "radius_m": 50 },
+  "wander_confidence": 0.6,             // thresholds
+  "no_response_seconds": 10,
+  "max_clarify_retries": 1,
+  "confirm_prompt": null,               // personalized prompts
+  "reassure_prompt": "It's late, Grandpa. Let's go back to bed.",
+  "clarify_prompt": null,
   "disease_stage": "moderate",
-  "notes": "night wandering increasing → lowered threshold + earlier quiet hours"
+  "notes": "night wandering increasing → lowered threshold"
 }
 ```
 
@@ -231,8 +234,8 @@ Ollama, and no network (used throughout the tests).
 patient: { id: p-001, name: "Grandpa Zhang", disease_stage: moderate }
 quiet_hours: { start: "22:00", end: "07:00" }
 thresholds: { wander_confidence: 0.7, no_response_seconds: 8, correlation_window_seconds: 120 }
-voice: { input: file, asr_model: small, tts_voice: en_US-medium, llm_model: phi3.5, use_llm_for_ambiguous: true, max_clarify_retries: 1 }
-cloud: { mode: stub, a2a_endpoint: "http://localhost:8971/a2a" }
+voice: { input: file, asr_model: small, tts_engine: sapi, tts_voice: en_US-medium, llm_model: phi3.5, use_llm_for_ambiguous: true, max_clarify_retries: 1, confirm_prompt: "{name}, are you okay?", reassure_prompt: "It's late. Let's head back to bed …", clarify_prompt: "I didn't catch that. Are you okay?" }
+cloud: { mode: stub, a2a_endpoint: "http://localhost:8971/a2a", offline_queue_dir: .airacare_queue, offline_ttl_seconds: 3600 }
 ```
 
 > `max_clarify_retries: 1` — on an `unclear` reply the agent re-asks **once**, then
