@@ -13,8 +13,10 @@ graded decision-making in the cloud. Together they turn fragmented sensor alerts
 
 ## Why it's inherently hybrid
 
-- **Privacy** — bedroom/bathroom sensing (radar, not cameras); **raw audio/video never
-  leaves the home** — only a structured `DailyLivingEvent` crosses to the cloud.
+- **Privacy** — privacy-sensitive rooms (bedroom/bathroom) use **radar, not cameras**;
+  where a camera or mic *is* used (e.g. the medication "pill-to-mouth" check), it's
+  processed **on-device** and the **raw audio/video/point-cloud never leaves the home** —
+  only a structured `DailyLivingEvent` crosses to the cloud.
 - **Real-time + offline** — fall/wander detection and first response must be instant and
   keep working with no network.
 - **Deep reasoning** — multi-event fusion, personalization, and graded decisions need the
