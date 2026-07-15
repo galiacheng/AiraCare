@@ -1,4 +1,4 @@
-"""Local patient-state store tests: seed, round-trip, upsert, miss, cosmos placeholder."""
+"""Local patient-state store tests: seed, round-trip, upsert, miss, cosmos protocol seam."""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ def test_satisfies_store_protocol() -> None:
     assert isinstance(LocalPatientStateStore(":memory:"), PatientStateStore)
 
 
-def test_cosmos_placeholder_raises() -> None:
-    with pytest.raises(NotImplementedError):
-        CosmosPatientStateStore()
+def test_cosmos_store_declares_protocol_methods() -> None:
+    # The Cosmos store is now a real (lazy-SDK) impl of the same protocol as the local store.
+    assert callable(CosmosPatientStateStore.get)
+    assert callable(CosmosPatientStateStore.upsert)

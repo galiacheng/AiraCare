@@ -40,15 +40,33 @@ cloud:
   the edge stub. It is **off the edge's safety path** — the edge already decided and acted;
   this response is for records + caregiver comms (the edge's report worker only waits ~5s
   before store-and-forward).
-- **T2 — Deliberate (asynchronous):** placeholder for the multi-agent fusion tier
-  (Risk-Reasoning / Knowledge / Escalation / Cognitive-trend / Briefing). Scheduled
-  fire-and-forget; stubbed in this scaffold.
+- **T2 — Deliberate (asynchronous):** fire-and-forget multi-agent tier (Risk-Reasoning /
+  Knowledge / Escalation / Cognitive-trend / Briefing / Policy-Learning), dispatched through a
+  pluggable executor (`InlineExecutor` default; `ThreadExecutor` for a real background worker,
+  drained via `join()`). Scheduled after the T1 reply and never affects it. **Wired:**
+  Policy-Learning (distills a versioned `EdgePolicyUpdate`), the **ack-tracked escalation
+  ladder** (family → community → emergency with per-rung ack timers), the **Knowledge agent**
+  (RAG over care guidelines that grounds cloud advice), and the batch **Cognitive-Trend**
+  (least-squares voice-biomarker trajectory) + **Briefing** (family daily · clinician monthly)
+  agents. Every scheduled event is also **filed** to the `EventStore` those batch agents read.
 
-### Patient state (Decision #6 = C)
+### Patient state & policy (Decision #6 = C)
 
-Patient state (disease stage + rolling baseline) lives in a **local** store —
-`store/local.py` (SQLite, file or `:memory:`). `store/cosmos.py` is a placeholder behind the
-`PatientStateStore` protocol so a Cosmos DB / Fabric backend can drop in later.
+Patient state (disease stage + rolling baseline) and the versioned per-patient edge policy
+live in **local** stores — `store/local.py` (`LocalPatientStateStore` + `LocalPolicyStore`,
+SQLite, file or `:memory:`). T1 personalizes the considered level by disease stage / baseline
+drift; `fetch_policy` serves the stored policy only when the edge is behind. Filed events land
+in `LocalEventStore` (the append-only analytics log the batch agents + Power BI read).
+`store/cosmos.py` now implements the **same** three protocols against **Azure Cosmos DB**
+(partition `/patient_id`, lazy `[cosmos]` SDK) so graduating local → Cosmos is a config flip
+(`store.backend: cosmos`), not a rewrite — see [`docs/production.md`](docs/production.md).
+
+### Analytics & briefings
+
+The Cognitive-Trend + Briefing agents batch-read the `EventStore`. `powerbi/` exports the same
+scrubbed events to a flat CSV (`python powerbi/generate.py`) that a **Power BI** dashboard loads
+— the hackathon stand-in for the production Cosmos DB → Fabric/OneLake mirror (see
+`powerbi/README.md`).
 
 ## Layout
 
@@ -58,11 +76,13 @@ airacare_foundry/
   config.py         # typed config (pydantic) from config.yaml
   orchestrator.py   # CareOrchestrator: T1 considered assessment (sync) + deliberate (async stub)
   a2a_server.py     # A2A / JSON-RPC server (Foundry stand-in)
-  assess/           # considered assessor (parity) + policy (reads the store)
-  store/            # base protocol + local SQLite store + cosmos placeholder
-  agents/           # DELIBERATE tier stub
-  tools/            # cloud-owned notification stub
-tests/              # parity + A2A roundtrip + store + orchestrator
+  assess/           # considered assessor (personalized) + policy (reads the state store)
+  store/            # base protocols + local SQLite stores (state + policy + events) + Cosmos impls
+  agents/           # DELIBERATE tier + policy-learning + escalation + knowledge + cognitive-trend + briefing
+  tools/            # notification/escalation timers + demo seed + Power BI export
+tests/              # parity + a2a + store + orchestrator + personalization + policy + knowledge + trend/briefing
+powerbi/            # Power BI pitch asset: generate.py -> sample_events.csv + dashboard README
+docs/               # production.md — Cosmos/Fabric/Hosted-Agent graduation guide
 ```
 
 ## Install & run
@@ -86,5 +106,6 @@ if it isn't present.
 ## Optional extras
 
 - `[agents]` — Microsoft Agent Framework for the real DELIBERATE tier (future).
-- `[cosmos]` — Azure Cosmos DB backend for the patient store (placeholder today).
+- `[search]` — Azure AI Search vector RAG for the Knowledge agent (placeholder today).
+- `[cosmos]` — Azure Cosmos DB backend (state + policy + events); `store.backend: cosmos`.
 - `[dev]` — pytest + ruff.

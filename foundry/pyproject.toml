@@ -19,6 +19,10 @@ agents = [
 cosmos = [
     "azure-cosmos>=4.7",
 ]
+# Azure AI Search vector RAG for the Knowledge agent (LocalKnowledgeBase used otherwise).
+search = [
+    "azure-search-documents>=11.4",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",

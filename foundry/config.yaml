@@ -5,8 +5,12 @@ server:
 
 # Patient-state store (Decision #6 = C: local for this scaffold)
 store:
-  backend: local             # local (SQLite / in-memory) | cosmos (placeholder — not wired)
-  sqlite_path: ":memory:"    # ":memory:" for ephemeral, or a file path to persist
+  backend: local             # local (SQLite / in-memory) | cosmos (production; needs [cosmos])
+  sqlite_path: ":memory:"    # ":memory:" for ephemeral, or a file path to persist (local)
+  # Cosmos backend (production graduation — see foundry/docs/production.md):
+  # cosmos_endpoint: "https://<account>.documents.azure.com:443/"
+  # cosmos_credential: "<key-or-injected-from-env>"
+  # cosmos_database: airacare
 
 # Default patient profile seeded into the local store (drives disease-stage reasoning)
 patient:
@@ -17,3 +21,14 @@ patient:
 # Asynchronous DELIBERATE tier (multi-agent fusion) — stubbed for this scaffold
 deliberate:
   enabled: false
+
+# Knowledge agent RAG backend (grounds cloud advice in care guidelines)
+knowledge:
+  backend: local              # local (in-memory guideline index) | azure (Azure AI Search — placeholder)
+
+# Cloud-owned escalation ladder contact directory (channel -> target). Used when the
+# deliberate tier runs the ack-tracked family -> community -> emergency ladder for L3.
+contacts: {}
+  # family: "+1-555-0100"
+  # community: "neighborhood-watch"
+  # emergency: "112"
