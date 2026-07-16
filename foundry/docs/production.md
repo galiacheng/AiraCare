@@ -247,3 +247,81 @@ Deferred (seams in place, not yet wired):
   scarce); the Knowledge agent uses the local in-memory KB until Search is provisioned.
 - **Fabric / OneLake mirroring + Power BI DirectLake** — the analytics tail (§3) is downstream
   and unchanged by the store/hosting swaps.
+
+## 8. Foundry Agent Service — the care-orchestrator as a Hosted Agent (Responses)
+
+§4–§6 host the **A2A safety path** (the frozen `airacare.report` / `airacare.fetch_policy`
+JSON-RPC) on ACA. This section is a **second, complementary surface**: the same six connected
+specialists, graduated onto **Azure AI Foundry Agent Service** as a fully-managed **Hosted Agent**
+that speaks the conversational **Responses** protocol — for caregivers/clinicians to *talk to*.
+It is **advisory/narrative only** and does **not** replace the edge, the A2A contract, or the ACA
+server. Project lives in [`foundry-hosted-agent/`](../../foundry-hosted-agent) and is driven by the
+**Azure Developer CLI (`azd`)** with the `microsoft.foundry` extension.
+
+**What it is.** `src/airacare-care-orchestrator/main.py` builds the AiraCare care-orchestrator on
+the Microsoft Agent Framework — a `FoundryChatClient` (Foundry **project** endpoint +
+`DefaultAzureCredential`, no key) driving one orchestrator `Agent` with the six specialists
+(risk-reasoning, knowledge, escalation, cognitive-trend, briefing, policy-learning) wrapped via
+`Agent.as_tool` — and serves it with `ResponsesHostServer` on port 8088 (`POST /responses`). The
+platform handles the container, hosting, scaling, auth, and observability. Same safety framing as
+§4: the model **restates the considered level verbatim, never sets risk or triggers escalation**,
+reasons only over facts the caregiver provides, and handles no raw modality data.
+
+### 8.1 Deploy (azd)
+
+```pwsh
+# Prereqs: Python 3.13+, azd >= 1.25.3, and the Foundry extension:
+azd ext install microsoft.foundry
+azd config set auth.useAzCliAuth true    # reuse `az login` (no browser prompt)
+
+cd foundry-hosted-agent
+azd env new airacare-agent
+azd env set AZURE_SUBSCRIPTION_ID <sub-id>
+azd env set AZURE_LOCATION eastus2
+azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME gpt-5.4   # gpt-5.4-mini has 0 quota on this sub
+
+azd provision      # NEW Foundry project + model deployment + ACR + App Insights (real cost)
+azd ai agent run   # local server on http://localhost:8088 (builds a venv on first run)
+azd ai agent invoke --local "Mom was confused near the front door at 2am. Edge acted at L3."
+azd deploy         # build + deploy the container to Foundry Agent Service
+azd ai agent invoke "Short family recap: Dad wandered to the kitchen twice but settled. Edge L1."
+azd ai agent monitor --follow
+
+azd down           # tear the whole resource group down when finished
+```
+
+> **Model note.** The quickstart defaults to `gpt-5.4-mini`, but that SKU had a **GlobalStandard
+> quota limit of 0 in every region** on this subscription, while `gpt-5.4` (GlobalStandard) had
+> 6000 available — so `azure.yaml` pins `gpt-5.4` (version `2026-03-05`), matching the model the
+> §4 advisory narrative already uses. Check quota with
+> `az cognitiveservices usage list -l <region> --query "[?contains(name.value,'gpt-5.4')]"`.
+
+### 8.2 Verified live
+
+Provisioned to `rg-airacare-agent` (eastus2): Foundry account `cog-jo2jqgwc7xe2m`, project
+`airacare-agent`, endpoint `https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent`,
+model `gpt-5.4`. Both invocations held the safety contract:
+
+- **Local** (`--local`, port 8088): an L3 nighttime-door prompt → the agent **restated L3**, kept
+  it, gave one practical next step (go to her, guide her from the door), and deferred urgent/medical
+  signs to emergency services / the clinician.
+- **Deployed** (`azd ai agent invoke`): an L1 kitchen-wander recap → a warm family briefing that
+  **restated L1, no escalation**, with a gentle "watch whether it happens more often" next step.
+
+Deployed agent endpoint (Responses):
+`https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/openai/responses?api-version=v1`
+(plus the Foundry portal **playground** link printed by `azd deploy`).
+
+### 8.3 A2A server (§4) vs. Hosted Agent (§8)
+
+| | ACA A2A server (§4–§6) | Foundry Hosted Agent (§8) |
+|---|---|---|
+| Protocol | A2A JSON-RPC (`airacare.report`/`fetch_policy`) — **frozen** | Responses (conversational) |
+| Consumer | The **edge** (store-and-forward safety path) | Caregivers/clinicians (chat) |
+| Role | Off-real-time-path cloud tier for the edge | Advisory narrative surface |
+| Host | Azure Container Apps + Cosmos via MI | Foundry Agent Service (managed) |
+| Model | `executor: agents` optional (advisory) | Always model-backed (advisory) |
+| Deploy | `foundry/infra` Bicep + `deploy-foundry.ps1` | `foundry-hosted-agent/` + `azd` |
+
+Both reuse the **same six connected specialists** and the **same safety discipline** (model never
+owns the level or escalation). The edge is untouched by §8.

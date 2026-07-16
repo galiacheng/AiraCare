@@ -1,0 +1,11 @@
+# azd environment + local secrets (never commit)
+.azure/
+src/airacare-care-orchestrator/.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
