@@ -10,6 +10,17 @@ import yaml
 from pydantic import BaseModel, Field
 
 
+def _expand_env(raw: str | None) -> str | None:
+    """Expand a whole-string ``${ENV_VAR}`` reference from the process environment.
+
+    A plain (non-``${...}``) value is returned unchanged, so local/emulator configs keep working
+    while container deploys inject secrets/endpoints via the environment.
+    """
+    if raw and raw.startswith("${") and raw.endswith("}"):
+        return os.environ.get(raw[2:-1])
+    return raw
+
+
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8971  # matches the edge's default a2a_endpoint
@@ -38,10 +49,20 @@ class StoreConfig(BaseModel):
         (or any var name) and the real key is read from the process environment at load time.
         A plain (non-``${...}``) value is returned as-is for local/emulator convenience.
         """
-        raw = self.cosmos_credential
-        if raw and raw.startswith("${") and raw.endswith("}"):
-            return os.environ.get(raw[2:-1])
-        return raw
+        return _expand_env(self.cosmos_credential)
+
+    def resolve_endpoint(self) -> str | None:
+        """Return the Cosmos endpoint, expanding a ``${ENV_VAR}`` reference (container deploys).
+
+        Lets a baked-in ``config.*.yaml`` stay environment-agnostic: set
+        ``cosmos_endpoint: ${AIRACARE_COSMOS_ENDPOINT}`` and the hosting platform (e.g. Azure
+        Container Apps) injects the real endpoint. A plain value is returned as-is.
+        """
+        return _expand_env(self.cosmos_endpoint)
+
+    def resolve_database(self) -> str:
+        """Return the Cosmos database name, expanding a ``${ENV_VAR}`` reference if present."""
+        return _expand_env(self.cosmos_database) or "airacare"
 
 
 class PatientConfig(BaseModel):

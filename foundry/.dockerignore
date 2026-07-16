@@ -17,4 +17,5 @@ infra/
 config.yaml
 config.*.yaml
 !config.container.yaml
+!config.aca.yaml
 README.md.bak

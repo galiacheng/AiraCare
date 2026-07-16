@@ -1,0 +1,36 @@
+# Foundry Care Orchestrator - Azure Container Apps (hosted-agent) profile. FH4.
+#
+# Differences from config.container.yaml:
+#   - store.backend: cosmos with cosmos_auth: aad -> the app authenticates to the EXISTING
+#     Cosmos account with its user-assigned Managed Identity (no account key anywhere). The
+#     ACA runtime sets AZURE_CLIENT_ID to the MI's clientId so DefaultAzureCredential selects it.
+#   - endpoint/database are injected from the environment (${...}) so this image stays generic;
+#     the ACA app supplies AIRACARE_COSMOS_ENDPOINT / AIRACARE_COSMOS_DATABASE at deploy time.
+#
+# The bearer token is injected via AIRACARE_A2A_TOKEN (an ACA secret), not written here.
+# The deliberate tier runs on the background 'thread' executor so report() returns immediately
+# (T2 stays off the edge safety path). Switch to 'agents' once the MAF workflow is bound (FH-next).
+server:
+  host: "0.0.0.0"
+  port: 8971
+
+store:
+  backend: cosmos
+  cosmos_endpoint: "${AIRACARE_COSMOS_ENDPOINT}"
+  cosmos_database: "${AIRACARE_COSMOS_DATABASE}"
+  cosmos_auth: aad
+  cosmos_tls_verify: true
+
+patient:
+  id: p-001
+  name: Grandpa Zhang
+  disease_stage: moderate
+
+deliberate:
+  enabled: true
+  executor: thread     # inline | thread | agents (agents = Microsoft Agent Framework)
+
+knowledge:
+  backend: local
+
+contacts: {}

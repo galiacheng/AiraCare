@@ -61,6 +61,42 @@ def test_cosmos_backend_requires_endpoint_and_credential() -> None:
         _build_stores(_cosmos_config())  # no endpoint/credential
 
 
+def test_resolve_endpoint_and_database_expand_env(monkeypatch) -> None:
+    # Container deploys keep a generic baked-in config and inject values via the environment.
+    monkeypatch.setenv("AIRACARE_COSMOS_ENDPOINT", "https://acct.documents.azure.com:443/")
+    monkeypatch.setenv("AIRACARE_COSMOS_DATABASE", "airacare")
+    sc = StoreConfig(
+        backend="cosmos",
+        cosmos_endpoint="${AIRACARE_COSMOS_ENDPOINT}",
+        cosmos_database="${AIRACARE_COSMOS_DATABASE}",
+        cosmos_auth="aad",
+    )
+    assert sc.resolve_endpoint() == "https://acct.documents.azure.com:443/"
+    assert sc.resolve_database() == "airacare"
+
+
+def test_resolve_endpoint_passthrough_and_database_default(monkeypatch) -> None:
+    monkeypatch.delenv("AIRACARE_MISSING_EP", raising=False)
+    # A plain value is returned unchanged; an unset ${VAR} endpoint resolves to None.
+    assert StoreConfig(cosmos_endpoint="https://plain/").resolve_endpoint() == "https://plain/"
+    assert StoreConfig(cosmos_endpoint="${AIRACARE_MISSING_EP}").resolve_endpoint() is None
+    # An unset ${VAR} database falls back to the default name rather than empty.
+    assert StoreConfig(cosmos_database="${AIRACARE_MISSING_EP}").resolve_database() == "airacare"
+
+
+def test_aad_backend_needs_only_endpoint(monkeypatch) -> None:
+    # With AAD auth, a missing credential is fine; only the endpoint is required. Build fails
+    # later at SDK import time (no [cosmos] extra), not on the endpoint/credential guard.
+    monkeypatch.setenv("AIRACARE_COSMOS_ENDPOINT", "https://acct.documents.azure.com:443/")
+    config = _cosmos_config(
+        cosmos_endpoint="${AIRACARE_COSMOS_ENDPOINT}", cosmos_auth="aad"
+    )
+    if _HAS_COSMOS:
+        pytest.skip("azure.cosmos installed; would attempt a real client build")
+    with pytest.raises(RuntimeError, match=r"\[cosmos\] extra"):
+        _build_stores(config)
+
+
 def test_local_backend_still_builds_all_three_stores() -> None:
     config = FoundryConfig(patient=PatientConfig(id="p-001", name="Grandpa Zhang"))
     state, policy, events = _build_stores(config)

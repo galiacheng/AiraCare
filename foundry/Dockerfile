@@ -41,6 +41,7 @@ COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY airacare_foundry ./airacare_foundry
 COPY config.container.yaml ./config.container.yaml
+COPY config.aca.yaml ./config.aca.yaml
 
 USER airacare
 EXPOSE 8971
