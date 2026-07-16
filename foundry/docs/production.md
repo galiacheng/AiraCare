@@ -127,49 +127,105 @@ OneLake**. This is zero-copy and continuous — no pipeline to build or babysit:
 
 ## 4. Run the T2 agents as a Foundry Hosted Agent
 
-The `CareOrchestrator` composes the two tiers today in-process. In production it becomes a
-**Foundry Hosted Agent**:
+The `CareOrchestrator` composes the two tiers in-process during the demo. In production it runs
+as a **hosted agent**: the FH2 container **is** the A2A endpoint, deployed on **Azure Container
+Apps** (ACA) and wired to Cosmos over a **Managed Identity** — no key, no edge change.
 
 - **T1 considered assessment** stays synchronous on the report call (prompt, patient-state
   aware) — unchanged logic.
 - **T2 Connected Agents** (Risk-Reasoning, Knowledge, Escalation, Cognitive-Trend, Briefing,
-  Policy-Learning) run on the **Microsoft Agent Framework** runtime (`[agents]` extra). The
-  `DeliberateTier.executor` seam already isolates dispatch, so wiring the framework's async
-  runtime in place of `ThreadExecutor` is a drop-in.
-- Tools (notify, geofence, escalation timer) register as **Hosted Agent tools/skills**.
-- The Hosted Agent exposes the **same** `airacare.report` / `airacare.fetch_policy` A2A methods
-  the stdlib server does, so the edge does not change.
+  Policy-Learning) run behind the `DeliberateTier.executor` seam. `executor: thread` is the
+  hosted default; `executor: agents` swaps in `AgentFrameworkExecutor` (the Microsoft Agent
+  Framework substrate, `[agents]` extra) once `agents/agent_framework.build_workflow()` binds the
+  six `connected_agent_specs()` to a live model deployment.
+- Tools (notify, geofence, escalation timer) are declared as pure descriptors in `tool_specs()`,
+  ready to register as Hosted Agent tools/skills.
+- The container exposes the **same** `airacare.report` / `airacare.fetch_policy` A2A methods the
+  stdlib server does (plus `GET /healthz` and optional bearer auth), so the edge does not change.
+
+### 4.1 Provision + deploy (reproducible IaC)
+
+`infra/foundry.bicep` + `infra/deploy-foundry.ps1` deploy the whole hosted tier. It reuses an
+existing Foundry account + model deployment and the existing Cosmos account, and creates a
+user-assigned Managed Identity, an ACR, the container image (`az acr build`), and the ACA app:
+
+```powershell
+# From foundry/infra. Requires: az login, an existing Cosmos account + a Foundry model deployment.
+./deploy-foundry.ps1 `
+  -SubscriptionId <sub> -ResourceGroup airacare-rg -Location eastus2 `
+  -CosmosAccountName <cosmos-account> `
+  -FoundryAccountName <foundry-account> -FoundryResourceGroup <foundry-rg> -FoundryDeployment gpt-5.4 `
+  -DeploySearch:$false      # Azure AI Search is decoupled — enable once the KB is wired
+# Re-runs are idempotent; add -SkipBuild to reuse an already-pushed image, and pass
+# -A2AToken <token> to keep the bearer token stable across deploys.
+```
+
+The script prints the hosted endpoint, the MI clientId, and the bearer token (never written to
+disk). What it wires up:
+
+- **Managed Identity → Cosmos (no key):** the app runs with `cosmos_auth: aad`; the bicep grants
+  the MI the **Cosmos DB Built-in Data Contributor** SQL role and injects `AZURE_CLIENT_ID` so
+  `DefaultAzureCredential` selects the user-assigned identity. The container config it runs is
+  `config.aca.yaml` (`store.backend: cosmos`, endpoint/db injected as env).
+- **Managed Identity → ACR** (`AcrPull`) so ACA can pull the image; **MI → Foundry account**
+  (`Cognitive Services OpenAI User`, cross-RG) so T2 can call the model once `build_workflow` is
+  live.
+- **Auth + TLS:** ACA gives HTTPS; `AIRACARE_A2A_TOKEN` enables bearer auth (401 without it).
 
 ## 5. Flip the edge to Foundry (config-only, no edge code change)
 
-The edge already speaks the frozen contract; point it at the hosted endpoint:
+The edge already speaks the frozen contract; point it at the hosted endpoint and supply the token
+**via env, never baked into config**:
 
 ```yaml
 # edge/config.yaml
 cloud:
   mode: foundry
-  a2a_endpoint: "https://<foundry-hosted-agent-endpoint>/a2a"
+  a2a_endpoint: "https://airacare-foundry.<region>.azurecontainerapps.io"
+  a2a_token: "${AIRACARE_A2A_TOKEN}"   # resolved from the environment at startup
 ```
 
-`edge/airacare_edge/cloud/factory.py` builds the same `A2AClient` for both `a2a` (local stub)
-and `foundry` (hosted) — only the endpoint and credentials differ. Provide credentials as the
-deployment requires.
+`edge/airacare_edge/cloud/factory.py` builds the same `A2AClient` for `a2a` (local stub) and
+`foundry` (hosted) — only the endpoint and token differ. The token is resolved from a `${VAR}`
+reference or the `AIRACARE_A2A_TOKEN` fallback, so no secret lives in source. The client attaches
+`Authorization: Bearer <token>` to every A2A call.
 
-## 6. End-to-end verification
+## 6. End-to-end verification (proven live)
 
-Run `spec/demo-runbook.md` against the hosted agent instead of the local stub:
+```powershell
+# health (unauthenticated) -> {"status": "ok"}
+curl https://airacare-foundry.<region>.azurecontainerapps.io/healthz
+```
 
-- Beats 1–3 are edge-local and unaffected.
-- Beat 4 (offline → resync) now re-syncs the queued `DailyLivingEvent` to the **real** Foundry
-  endpoint; confirm the `CloudAssessment` comes back with the expected `considered_level` and a
-  `policy_version` piggyback, and that a subsequent `fetch_policy` returns the learned
-  `EdgePolicyUpdate` after the nighttime-wander threshold trips.
-- Confirm the event appears in Cosmos (`daily_event`) and, within the mirror latency, in the
-  OneLake Delta table / Power BI model.
+Then drive the edge against the hosted agent — the session `e2e_foundry_roundtrip.py` driver
+reads `AIRACARE_FOUNDRY_URL` + `AIRACARE_A2A_TOKEN`:
 
-## 7. What is intentionally *not* built for the hackathon
+- **Beat 1 (online):** a nighttime wander — the edge acts locally first (**L3**, escalation fires
+  *before* the cloud), then the hosted agent returns a considered **L3** `CloudAssessment` over
+  real HTTPS + bearer auth, with `family` + `community` notifications and a `policy_version`
+  piggyback.
+- **Beat 2 (offline → resync):** the cloud is unreachable, so the edge still acts and the
+  `DailyLivingEvent` is queued to disk; when connectivity returns, the queue flushes to the
+  **real** hosted agent (resync sent, remaining 0).
+- **Auth matrix:** `airacare.report` returns **401 without** a token and **200 with** it.
+- **Cosmos via MI:** every reported event lands in the Cosmos `daily_event` container written by
+  the app's Managed Identity (no key) — verify with a `SELECT` on `patient_id`; a subsequent
+  `fetch_policy` returns the learned `EdgePolicyUpdate` after the nighttime-wander threshold
+  trips. Within the mirror latency it also appears in the OneLake Delta table / Power BI model.
 
-Standing up the full Cosmos + Fabric + Hosted Agent stack is hours of infra a judge never sees
-and adds live-demo failure surface. Because the seams above make graduation a swap, the pitch
-ships the **local** path plus **one Power BI dashboard** fed by exported sample events
-(`powerbi/`) — enough to sell the clinician-view / population-health story without the risk.
+## 7. What is built vs. deferred
+
+The **Cosmos store** (§2) and the **hosted agent on ACA → Cosmos via Managed Identity** (§4–§6)
+are both provisioned by IaC and verified live. The **default demo path stays local** (SQLite +
+in-process orchestrator + one Power BI dashboard fed by `powerbi/` sample events) so a judge sees
+zero live-infra failure surface — the seams above make graduation a config swap, not a rewrite.
+
+Deferred (seams in place, not yet wired):
+
+- **MAF model binding** — `agents/agent_framework.build_workflow()` is the documented seam that
+  binds the six Connected Agents to the `gpt-5.4` deployment; until it lands, the hosted app runs
+  `executor: thread` and does not call the model.
+- **Azure AI Search KB** — decoupled behind the `deploySearch` flag (free-tier capacity is
+  scarce); the Knowledge agent uses the local in-memory KB until Search is provisioned.
+- **Fabric / OneLake mirroring + Power BI DirectLake** — the analytics tail (§3) is downstream
+  and unchanged by the store/hosting swaps.

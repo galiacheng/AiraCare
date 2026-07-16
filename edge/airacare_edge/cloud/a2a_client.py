@@ -20,16 +20,20 @@ FETCH_POLICY_METHOD = "airacare.fetch_policy"
 
 
 class A2AClient:
-    def __init__(self, endpoint: str, timeout: float = 5.0) -> None:
+    def __init__(self, endpoint: str, timeout: float = 5.0, token: str | None = None) -> None:
         self._endpoint = endpoint
         self._timeout = timeout
+        self._token = token
 
     def _call(self, method: str, params: dict) -> dict | None:
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        headers = {"Content-Type": "application/json"}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
         request = urllib.request.Request(
             self._endpoint,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:

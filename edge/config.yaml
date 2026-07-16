@@ -33,3 +33,7 @@ voice:
 cloud:
   mode: stub                     # stub (local async assessment) | foundry (real Hosted Agent)
   a2a_endpoint: "http://localhost:8971/a2a"
+  # For mode: foundry, point at the hosted agent and supply a bearer token WITHOUT baking the
+  # secret here — use an env reference (resolved at startup) or set AIRACARE_A2A_TOKEN in the env:
+  #   a2a_endpoint: "https://airacare-foundry.<region>.azurecontainerapps.io"
+  #   a2a_token: "${AIRACARE_A2A_TOKEN}"
