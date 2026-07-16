@@ -105,6 +105,10 @@ class DeliberateTier:
         knowledge: KnowledgeAgent | None = None,
         event_store: EventStore | None = None,
         executor: DeliberateExecutor | None = None,
+        narrator: Callable[
+            [DailyLivingEvent, "PatientState | None", CloudAssessment | None], str
+        ]
+        | None = None,
     ) -> None:
         self.enabled = enabled
         self._policy_learning = policy_learning
@@ -112,8 +116,14 @@ class DeliberateTier:
         self._knowledge = knowledge
         self._event_store = event_store
         self._executor: DeliberateExecutor = executor or InlineExecutor()
+        # Optional advisory narrator (FH6): a callable that turns (event, state, assessment) into a
+        # caregiver briefing string via a live Foundry model. It is called strictly AFTER — and
+        # never alters — the deterministic agents above; failures are swallowed. None keeps the
+        # tier fully deterministic (the default for tests/demo/CI and the local path).
+        self._narrator = narrator
         self.scheduled: list[str] = []  # patient_ids seen — visibility for tests/demo
         self.advice_log: list[GroundedAdvice] = []  # grounded advice produced — visibility
+        self.narrative_log: list[str] = []  # advisory model narratives produced — visibility
 
     def schedule(
         self,
@@ -144,6 +154,15 @@ class DeliberateTier:
                 self.advice_log.append(advice)
         if self._escalation is not None:
             self._escalation.handle(event, assessment)
+        # Advisory narrative (FH6) — strictly last, best-effort, never authoritative. A model
+        # call is slow and may fail; it must never crash the tier or influence the agents above.
+        if self._narrator is not None:
+            try:
+                narrative = self._narrator(event, state, assessment)
+            except Exception:  # noqa: BLE001 — advisory only; a model failure is non-fatal
+                narrative = ""
+            if narrative:
+                self.narrative_log.append(narrative)
 
     def join(self) -> None:
         """Await any in-flight async jobs (no-op for the inline executor)."""

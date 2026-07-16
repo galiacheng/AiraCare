@@ -136,8 +136,23 @@ Apps** (ACA) and wired to Cosmos over a **Managed Identity** — no key, no edge
 - **T2 Connected Agents** (Risk-Reasoning, Knowledge, Escalation, Cognitive-Trend, Briefing,
   Policy-Learning) run behind the `DeliberateTier.executor` seam. `executor: thread` is the
   hosted default; `executor: agents` swaps in `AgentFrameworkExecutor` (the Microsoft Agent
-  Framework substrate, `[agents]` extra) once `agents/agent_framework.build_workflow()` binds the
-  six `connected_agent_specs()` to a live model deployment.
+  Framework substrate, `[agents]` extra). When `executor: agents` is selected **and** a Foundry
+  model endpoint + deployment are configured (`deliberate.foundry_endpoint` /
+  `deliberate.foundry_deployment`, e.g. `${AIRACARE_FOUNDRY_ENDPOINT}` / `${AIRACARE_FOUNDRY_DEPLOYMENT}`),
+  `agents/agent_framework.build_workflow()` binds the six `connected_agent_specs()` to the live
+  `gpt-5.4` deployment as MAF **connected agents** (each specialist wrapped via `Agent.as_tool`
+  under one orchestrator agent) reached over the Azure OpenAI **Responses API** with
+  `DefaultAzureCredential` (the same Managed Identity — no key; `api_version: preview`).
+- **The model is advisory, narrative-only.** The workflow runs *after* the deterministic T2
+  agents and produces a plain-language caregiver briefing from a **scrubbed `case_file`** (only
+  derived facts — event type, timestamps, edge level/action, the considered level + reason,
+  baseline drift, and a *count* of voice-biomarker features; never raw audio/transcripts/feature
+  values). It is instructed to restate the authoritative considered level verbatim; it **never**
+  sets the risk level or drives escalation — `ConsideredAssessor` / `EscalationAgent` remain the
+  sole authority. A model failure is swallowed (the tier is off the safety path). The narrative is
+  surfaced on `DeliberateTier.narrative_log`. Leaving the endpoint unset keeps `executor: agents`
+  fully deterministic (no model call). Verified live against `gpt-5.4`: an L3 nighttime-wander
+  report yields a family briefing that restates L3 and notes the edge already escalated.
 - Tools (notify, geofence, escalation timer) are declared as pure descriptors in `tool_specs()`,
   ready to register as Hosted Agent tools/skills.
 - The container exposes the **same** `airacare.report` / `airacare.fetch_policy` A2A methods the
@@ -168,8 +183,8 @@ disk). What it wires up:
   `DefaultAzureCredential` selects the user-assigned identity. The container config it runs is
   `config.aca.yaml` (`store.backend: cosmos`, endpoint/db injected as env).
 - **Managed Identity → ACR** (`AcrPull`) so ACA can pull the image; **MI → Foundry account**
-  (`Cognitive Services OpenAI User`, cross-RG) so T2 can call the model once `build_workflow` is
-  live.
+  (`Cognitive Services OpenAI User`, cross-RG) so T2's advisory workflow can call the `gpt-5.4`
+  model via `DefaultAzureCredential` (no key) when `executor: agents` is enabled.
 - **Auth + TLS:** ACA gives HTTPS; `AIRACARE_A2A_TOKEN` enables bearer auth (401 without it).
 
 ## 5. Flip the edge to Foundry (config-only, no edge code change)
@@ -222,9 +237,12 @@ zero live-infra failure surface — the seams above make graduation a config swa
 
 Deferred (seams in place, not yet wired):
 
-- **MAF model binding** — `agents/agent_framework.build_workflow()` is the documented seam that
-  binds the six Connected Agents to the `gpt-5.4` deployment; until it lands, the hosted app runs
-  `executor: thread` and does not call the model.
+- **Model-backed T2 in the deployed app** — `agents/agent_framework.build_workflow()` is **built
+  and verified live** (the six Connected Agents bind to `gpt-5.4` as MAF connected agents and
+  compose an advisory caregiver narrative; see §4). The deployed ACA app still defaults to
+  `executor: thread` (no per-event model cost/latency); flip it to `executor: agents` with
+  `deliberate.foundry_endpoint` / `deliberate.foundry_deployment` set to graduate the hosted app
+  to model-backed narratives. The model stays advisory — it never sets the risk level.
 - **Azure AI Search KB** — decoupled behind the `deploySearch` flag (free-tier capacity is
   scarce); the Knowledge agent uses the local in-memory KB until Search is provisioned.
 - **Fabric / OneLake mirroring + Power BI DirectLake** — the analytics tail (§3) is downstream

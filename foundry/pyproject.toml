@@ -12,9 +12,14 @@ dependencies = [
 [project.optional-dependencies]
 # Real multi-agent DELIBERATE tier (Risk-Reasoning / Knowledge / Escalation / Cognitive-trend /
 # Briefing / Policy-Learning). Selected by deliberate.executor: agents; imported lazily so the
-# local inline/thread paths never need the SDK (mirrors the cosmos discipline).
+# local inline/thread paths never need the SDK (mirrors the cosmos discipline). agent-framework-*
+# are the real Microsoft Agent Framework packages (core = Agent/WorkflowBuilder, openai =
+# OpenAIChatClient for Azure OpenAI/AI Foundry); azure-identity provides the AAD (Managed Identity)
+# credential used to reach the model — no account key.
 agents = [
-    "agent-framework>=1.0",
+    "agent-framework-core>=1.11",
+    "agent-framework-openai>=1.11",
+    "azure-identity>=1.17",
 ]
 # Cosmos DB / Fabric backed PatientStateStore. azure-identity enables AAD / Managed Identity
 # auth (store.cosmos_auth: aad); the account-key path needs only azure-cosmos.

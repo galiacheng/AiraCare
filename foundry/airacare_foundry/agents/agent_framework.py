@@ -15,13 +15,23 @@ Design intent (see foundry-design.md §5):
 - The adapter scaffolding (:func:`connected_agent_specs`, :func:`tool_specs`) declares how the six
   Connected Agents and the Notify / Geofence / EscalationTimer tools map onto MAF agents/skills.
   These are pure descriptors (no MAF import, no model) so the offline demo/tests can introspect
-  the planned topology. **FH4** binds them to a live Foundry model deployment via
-  :func:`build_workflow`, which is intentionally left as a documented ``NotImplementedError`` seam
-  until a model endpoint exists.
+  the planned topology. :func:`build_workflow` (**FH6**) now binds them to a **live** Foundry model
+  deployment: it builds a MAF orchestrator agent on ``gpt-5.4`` (Azure OpenAI Responses API, AAD)
+  that delegates to the six Connected Agents wrapped as tools, and returns a :class:`CareWorkflow`
+  whose :meth:`~CareWorkflow.narrate` composes an **advisory caregiver narrative** from a scrubbed
+  :func:`case_file`.
+
+Safety discipline (the model is advisory-only): the narrative is produced *after* — and never
+alters — the deterministic T1 :class:`~airacare_foundry.contracts.CloudAssessment`. The Python
+agents (``ConsideredAssessor``, ``EscalationAgent``, ``PolicyLearningAgent`` …) remain the sole
+authority for the considered level and for escalation; the orchestrator is instructed to restate
+the fixed level verbatim. No raw modality data is placed in the case file — only derived facts
+already present on the reported event/assessment.
 
 Discipline: ``agent-framework`` is a **lazy** optional import behind the ``[agents]`` extra — the
 local ``inline`` / ``thread`` paths never need the SDK, mirroring the ``azure-cosmos`` pattern.
-Constructing :class:`AgentFrameworkExecutor` without the SDK raises a clear, actionable error.
+Constructing :class:`AgentFrameworkExecutor` or :func:`build_workflow` without the SDK raises a
+clear, actionable error.
 """
 
 from __future__ import annotations
@@ -30,22 +40,29 @@ import asyncio
 import threading
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:  # typing-only imports; no runtime dependency on the SDK or heavy modules
+    from airacare_foundry.contracts import CloudAssessment, DailyLivingEvent
+    from airacare_foundry.store.base import PatientState
 
 __all__ = [
     "AgentFrameworkExecutor",
     "AgentSpec",
     "ToolSpec",
+    "CareWorkflow",
     "connected_agent_specs",
     "tool_specs",
     "build_workflow",
+    "case_file",
     "agent_framework_available",
 ]
 
 _MISSING_SDK = (
     "deliberate.executor: 'agents' requires the Microsoft Agent Framework, which is not "
     "installed. Install the optional extra:  pip install -e \".[agents]\"  "
-    "(pulls agent-framework). The local 'inline' and 'thread' executors need no extra."
+    "(pulls agent-framework-core + agent-framework-openai). The local 'inline' and 'thread' "
+    "executors need no extra."
 )
 
 
@@ -247,16 +264,177 @@ def tool_specs() -> list[ToolSpec]:
     ]
 
 
-def build_workflow(model_endpoint: str | None = None, **_: object):
-    """FH4 seam: assemble the Connected Agents + tools into a live MAF workflow.
+def build_workflow(
+    endpoint: str,
+    deployment: str,
+    *,
+    api_version: str = "preview",
+    credential: object | None = None,
+    require_sdk: bool = True,
+) -> "CareWorkflow":
+    """Bind the six Connected Agents to a live Foundry model and return a :class:`CareWorkflow`.
 
-    Left as a documented seam until a Foundry model deployment exists (FH4). It will use the SDK's
-    ``WorkflowBuilder`` to register the :func:`connected_agent_specs` as MAF agents bound to
-    ``model_endpoint`` and the :func:`tool_specs` as their skills, then hand the workflow to
-    :class:`AgentFrameworkExecutor` to run per event.
+    Builds a Microsoft Agent Framework orchestrator agent on ``deployment`` (Azure OpenAI /
+    AI Foundry, reached at ``endpoint`` over the Responses API — hence ``api_version="preview"``)
+    that delegates to each of :func:`connected_agent_specs` wrapped as a tool (the MAF
+    "connected agents" pattern). ``credential`` defaults to ``DefaultAzureCredential`` (Managed
+    Identity in the container, ``az login`` locally) — **no account key** is ever used.
+
+    The returned workflow is **advisory only**: :meth:`CareWorkflow.narrate` composes a caregiver
+    narrative from a scrubbed :func:`case_file` and is instructed to restate the fixed considered
+    level verbatim. It never sets the level or drives escalation — the deterministic Python agents
+    remain authoritative.
+
+    ``require_sdk`` is retained for symmetry with :class:`AgentFrameworkExecutor`; the SDK is
+    always needed to actually build a workflow, so this raises the ``[agents]``-extra error when
+    the framework is absent.
     """
-    _require_agent_framework()  # ensure the SDK is present before anyone wires a model
-    raise NotImplementedError(
-        "build_workflow is an FH4 seam: it binds the Connected Agents to a live Foundry model "
-        "deployment. FH3 ships the offline executor + adapter descriptors only."
+    if require_sdk:
+        _require_agent_framework()
+    try:
+        from agent_framework import Agent
+        from agent_framework.openai import OpenAIChatClient
+    except ImportError as exc:  # pragma: no cover - exercised only without the SDK
+        raise ImportError(_MISSING_SDK) from exc
+
+    if credential is None:
+        try:
+            from azure.identity import DefaultAzureCredential
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "build_workflow needs azure-identity for AAD auth: pip install -e \".[agents]\""
+            ) from exc
+        credential = DefaultAzureCredential()
+
+    client = OpenAIChatClient(
+        model=deployment,
+        azure_endpoint=endpoint,
+        credential=credential,
+        api_version=api_version,
     )
+
+    tools = []
+    for spec in connected_agent_specs():
+        specialist = Agent(
+            client=client,
+            name=spec.name,
+            description=spec.role,
+            instructions=(
+                f"{spec.instructions}\n\nYou are consulted on a FIXED case file whose facts — "
+                "especially the considered risk level and the edge action already taken — are "
+                "authoritative and must not be changed. Contribute only within your role; if the "
+                "case file is irrelevant to your role, say so briefly."
+            ),
+        )
+        tools.append(
+            specialist.as_tool(
+                arg_name="case",
+                arg_description="the fixed, scrubbed case file to reason about",
+                propagate_session=False,
+            )
+        )
+
+    orchestrator = Agent(
+        client=client,
+        name="care-orchestrator",
+        description="Compose an advisory caregiver briefing for a reported daily-living event.",
+        instructions=_ORCHESTRATOR_INSTRUCTIONS,
+        tools=tools,
+    )
+    return CareWorkflow(orchestrator, specialist_names=[s.name for s in connected_agent_specs()])
+
+
+_ORCHESTRATOR_INSTRUCTIONS = (
+    "You are AiraCare's cloud care-orchestrator for an in-home Alzheimer's patient. You receive a "
+    "FIXED case file summarizing one privacy-scrubbed daily-living event and the deterministic "
+    "assessment that was ALREADY made and acted on at the edge.\n\n"
+    "Hard rules (safety):\n"
+    "1. The 'considered level' in the case file is authoritative. Restate it exactly; NEVER raise, "
+    "lower, or second-guess it. You are advisory only — you do not decide risk or trigger alerts.\n"
+    "2. Use ONLY facts present in the case file. Do not invent events, vitals, names, or history.\n"
+    "3. No diagnosis and no medication changes.\n\n"
+    "Consult the specialist tools (risk-reasoning, knowledge, escalation, cognitive-trend, "
+    "briefing, policy-learning) as helpful, passing the case file text. Then return a short, warm, "
+    "plain-language caregiver briefing (a few sentences): what happened, the considered level and "
+    "why it stands, what the edge already did, and one gentle, practical next step for the family. "
+    "Do not include internal tool chatter."
+)
+
+
+def case_file(
+    event: "DailyLivingEvent",
+    assessment: "CloudAssessment | None" = None,
+    *,
+    patient_name: str | None = None,
+    state: "PatientState | None" = None,
+) -> str:
+    """Render a fixed, privacy-scrubbed case file (plain text) for the advisory narrator.
+
+    Includes only derived facts already carried by the reported event/assessment — event type,
+    timestamps, the edge's own level/action, the considered level + reason, baseline drift, and a
+    *count* of voice-biomarker features (never the raw feature vector, transcripts, audio, video,
+    or point-cloud). This text is the sole input the model reasons over.
+    """
+    considered = assessment.considered_level if assessment is not None else event.edge_assessed_level
+    reason = assessment.reason if assessment is not None else "(no considered reason recorded)"
+    who = patient_name or event.patient_id
+    stage = getattr(state, "disease_stage", None)
+    ts = event.timestamp.isoformat()
+    ctx_keys = ", ".join(sorted(event.context)) if event.context else "none"
+    lines = [
+        "CASE FILE (facts are fixed and authoritative — do not change the considered level):",
+        f"- patient: {who}" + (f" (disease stage: {stage})" if stage else ""),
+        f"- event type: {event.type}",
+        f"- timestamp (UTC): {ts}",
+        f"- edge-detected confidence: {event.confidence:.2f}",
+        f"- baseline deviation: {event.baseline_deviation:.2f} (0=normal, 1=large change)",
+        f"- edge assessed level: {event.edge_assessed_level}",
+        f"- edge action already taken: {event.edge_action_taken}",
+        f"- CONSIDERED LEVEL (authoritative): {considered}",
+        f"- considered reason: {reason}",
+        f"- voice-biomarker features present: {len(event.features)} (values withheld for privacy)",
+        f"- context keys: {ctx_keys}",
+    ]
+    return "\n".join(lines)
+
+
+class CareWorkflow:
+    """A live MAF orchestrator that composes an advisory caregiver narrative for one event.
+
+    Owns a private asyncio event loop on a daemon thread (the MAF async substrate); the model
+    client + AAD token are reused across events. :meth:`narrate` is synchronous — safe to call from
+    the deliberate tier's worker thread — and returns the orchestrator's plain-language briefing.
+
+    The narrative is advisory: it never changes the considered level or drives escalation.
+    """
+
+    def __init__(self, orchestrator: object, *, specialist_names: list[str] | None = None) -> None:
+        self._agent = orchestrator
+        self.specialist_names = list(specialist_names or [])
+        self._loop = asyncio.new_event_loop()
+        self._closed = False
+        self._thread = threading.Thread(target=self._run_loop, name="maf-narrate", daemon=True)
+        self._thread.start()
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    async def _narrate(self, case: str) -> str:
+        result = await self._agent.run(case)
+        return getattr(result, "text", None) or str(result)
+
+    def narrate(self, case: str, *, timeout: float = 90.0) -> str:
+        """Run the orchestrator on ``case`` (a :func:`case_file` string) and return the briefing."""
+        if self._closed:
+            raise RuntimeError("CareWorkflow is closed")
+        fut = asyncio.run_coroutine_threadsafe(self._narrate(case), self._loop)
+        return fut.result(timeout=timeout)
+
+    def close(self) -> None:
+        """Stop the background loop (idempotent). For clean teardown/tests."""
+        if self._closed:
+            return
+        self._closed = True
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5.0)

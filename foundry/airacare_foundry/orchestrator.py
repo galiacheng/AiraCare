@@ -66,6 +66,35 @@ def _build_executor(kind: str):
     return InlineExecutor()
 
 
+def _build_narrator(config: FoundryConfig):
+    """Build the advisory model narrator for ``executor: agents`` (or None to stay deterministic).
+
+    Returns a ``(event, state, assessment) -> str`` callable only when the agents executor is
+    selected AND a Foundry model endpoint + deployment resolve (plain or ``${ENV_VAR}``). The
+    callable renders a scrubbed :func:`case_file` and runs the live MAF workflow to compose an
+    advisory caregiver briefing. Any other configuration returns None — the deliberate tier then
+    stays fully deterministic (local/CI default), preserving parity.
+    """
+    dc = config.deliberate
+    if dc.executor != "agents":
+        return None
+    endpoint = dc.resolve_foundry_endpoint()
+    deployment = dc.resolve_foundry_deployment()
+    if not endpoint or not deployment:
+        return None
+
+    from airacare_foundry.agents.agent_framework import build_workflow, case_file
+
+    workflow = build_workflow(endpoint, deployment, api_version=dc.foundry_api_version)
+
+    def narrate(event: DailyLivingEvent, state, assessment: CloudAssessment | None) -> str:
+        return workflow.narrate(
+            case_file(event, assessment, patient_name=config.patient.name, state=state)
+        )
+
+    return narrate
+
+
 class CareOrchestrator:
     """Considered-assessment-first cloud gateway with an asynchronous deliberate tier.
 
@@ -147,6 +176,7 @@ class CareOrchestrator:
             knowledge=knowledge,
             event_store=event_store,
             executor=_build_executor(config.deliberate.executor),
+            narrator=_build_narrator(config),
         )
         return cls(store, deliberate=deliberate, policy_store=policy_store, event_store=event_store)
 

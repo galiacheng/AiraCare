@@ -9,7 +9,10 @@
 #
 # The bearer token is injected via AIRACARE_A2A_TOKEN (an ACA secret), not written here.
 # The deliberate tier runs on the background 'thread' executor so report() returns immediately
-# (T2 stays off the edge safety path). Switch to 'agents' once the MAF workflow is bound (FH-next).
+# (T2 stays off the edge safety path). To graduate the hosted app to model-backed T2, set
+# executor: agents and uncomment the foundry_* binding below — the six Connected Agents then run
+# on the Microsoft Agent Framework against gpt-5.4 (AAD via the same MI, no key) and produce an
+# advisory caregiver narrative. The model NEVER sets the risk level; it is narrative-only.
 server:
   host: "0.0.0.0"
   port: 8971
@@ -29,6 +32,10 @@ patient:
 deliberate:
   enabled: true
   executor: thread     # inline | thread | agents (agents = Microsoft Agent Framework)
+  # Model binding for executor: agents (advisory narrative only). Injected by infra/foundry.bicep.
+  # foundry_endpoint: "${AIRACARE_FOUNDRY_ENDPOINT}"
+  # foundry_deployment: "${AIRACARE_FOUNDRY_DEPLOYMENT}"
+  # foundry_api_version: preview
 
 knowledge:
   backend: local

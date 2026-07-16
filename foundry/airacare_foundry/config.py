@@ -78,6 +78,25 @@ class DeliberateConfig(BaseModel):
     #   "thread"  — run on a background worker so report() returns immediately (hosted server)
     #   "agents"  — run on the Microsoft Agent Framework runtime ([agents] extra; FH3)
     executor: Literal["inline", "thread", "agents"] = "inline"
+    # Foundry model binding for the "agents" executor (FH6). When both endpoint and deployment
+    # resolve, the six Connected Agents are bound to this Azure AI Foundry / Azure OpenAI model
+    # (AAD auth via Managed Identity / az login — never a key) and the deliberate tier composes an
+    # advisory caregiver narrative. The model is narrative-only: it never sets the considered level
+    # or drives escalation (the deterministic Python agents remain authoritative). Left unset ->
+    # the "agents" executor still runs the deterministic T2, but produces no model narrative.
+    # Values may be a plain string or a ``${ENV_VAR}`` reference (container deploys inject them).
+    foundry_endpoint: str | None = None  # e.g. ${AIRACARE_FOUNDRY_ENDPOINT}
+    foundry_deployment: str | None = None  # e.g. ${AIRACARE_FOUNDRY_DEPLOYMENT}
+    # OpenAIChatClient talks the Azure OpenAI Responses API, which requires "preview" here.
+    foundry_api_version: str = "preview"
+
+    def resolve_foundry_endpoint(self) -> str | None:
+        """Return the Foundry model endpoint, expanding a ``${ENV_VAR}`` reference if present."""
+        return _expand_env(self.foundry_endpoint)
+
+    def resolve_foundry_deployment(self) -> str | None:
+        """Return the Foundry model/deployment name, expanding a ``${ENV_VAR}`` reference."""
+        return _expand_env(self.foundry_deployment)
 
 
 class KnowledgeConfig(BaseModel):
