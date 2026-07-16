@@ -2,5 +2,8 @@ agent-framework-foundry
 agent-framework-foundry-hosting>=1.0.0a260630
 python-dotenv
 
+# Care-record data access (AAD only; read daily_event/patient_state, write care_briefing).
+azure-cosmos>=4.5.0
+
 # debugpy enables local debugging of this agent with the Foundry Toolkit VS Code extension.
 debugpy

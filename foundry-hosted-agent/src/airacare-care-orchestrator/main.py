@@ -4,19 +4,28 @@
 This is the cloud **care-orchestrator** graduated onto the Microsoft Agent Framework and hosted by
 Azure AI Foundry Agent Service. A caregiver or clinician converses with it (Responses API); the
 orchestrator consults six connected specialists — risk-reasoning, knowledge, escalation,
-cognitive-trend, briefing, policy-learning — each wrapped as a tool, and returns a warm,
-plain-language caregiver briefing.
+cognitive-trend, briefing, policy-learning — each wrapped as a tool, and can look up the patient's
+real filed events / state from Cosmos DB and save an advisory briefing back.
 
 Safety discipline (mirrors the FH6 design in
 ``foundry/airacare_foundry/agents/agent_framework.py``): the model is **advisory only**. It never
 sets or second-guesses the risk level and never triggers alerts — the deterministic edge/cloud
-Python agents remain the sole authority for the considered level and for escalation. When the
-caregiver states a considered level or an action already taken, the orchestrator restates it
-verbatim and reasons only over facts the caregiver provides. No diagnosis, no medication changes.
+Python agents remain the sole authority for the considered level and for escalation. Any
+``considered_level`` read from the event store is authoritative and is restated verbatim. No
+diagnosis, no medication changes.
 
-This hosted agent is a NEW conversational surface. It is DISTINCT from — and does not replace — the
-frozen edge A2A safety path (``airacare.report`` / ``airacare.fetch_policy``) or the existing ACA
-A2A server. No raw modality data (audio, video, point-cloud, transcripts) is handled here.
+Data access (least privilege, AAD only — no keys):
+- Reads the **same** Cosmos containers the edge/A2A pipeline writes (``daily_event``,
+  ``patient_state``), surfacing only derived, privacy-scrubbed facts (event type, timestamp,
+  considered level, patient name/stage) — never raw audio/video/transcripts or the voice-biomarker
+  feature vector.
+- Writes ONLY to a dedicated ``care_briefing`` container (agent-authored notes). It never mutates
+  the authoritative ``daily_event`` / ``patient_state`` / ``edge_policy`` records.
+- If ``AIRACARE_COSMOS_ENDPOINT`` is unset, the data tools degrade gracefully (the agent still runs
+  as a stateless advisor), mirroring the store-optional design of the main package.
+
+This hosted agent is a NEW conversational surface, DISTINCT from the frozen edge A2A safety path
+(``airacare.report`` / ``airacare.fetch_policy``) and the ACA A2A server.
 
 Runtime contract (from the Foundry Agent-Framework Responses sample):
 - ``FoundryChatClient`` reaches the Foundry **project** endpoint (``FOUNDRY_PROJECT_ENDPOINT``)
@@ -26,8 +35,11 @@ Runtime contract (from the Foundry Agent-Framework Responses sample):
 """
 
 import os
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Any
 
-from agent_framework import Agent
+from agent_framework import Agent, tool
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.identity import DefaultAzureCredential
@@ -109,14 +121,19 @@ _ORCHESTRATOR_INSTRUCTIONS = (
     "privacy-scrubbed daily-living events and decide gentle next steps.\n\n"
     "Hard rules (safety — never break these):\n"
     "1. You are ADVISORY ONLY. You never decide or change the risk level and you never trigger "
-    "alerts or escalation. If the caregiver states a considered level (L0-L3) or an action already "
-    "taken at the edge, restate it EXACTLY and never raise, lower, or second-guess it.\n"
-    "2. Use ONLY facts the caregiver provides. Do not invent events, vitals, names, medications, "
-    "or history. If you need a detail, ask.\n"
+    "alerts or escalation. Any considered level (L0-L3) — whether the caregiver states it or you "
+    "read it from the event store — is authoritative: restate it EXACTLY and never raise, lower, "
+    "or second-guess it.\n"
+    "2. Use ONLY facts the caregiver provides or that you read via the data tools. Do not invent "
+    "events, vitals, names, medications, or history. If you need a detail, ask.\n"
     "3. No diagnosis and no medication changes. For anything urgent or medical, advise contacting "
     "the appropriate professional or emergency services.\n"
     "4. Never request or handle raw audio, video, images, or transcripts — reason only over the "
-    "derived facts described to you.\n\n"
+    "derived facts described to you or returned by the tools.\n\n"
+    "Data tools: when the caregiver refers to a specific patient (by id, e.g. 'p-001'), you may "
+    "call fetch_recent_events and fetch_patient_state to ground your answer in their real filed "
+    "history, and log_care_briefing to save a short advisory recap for the record. Saving a "
+    "briefing is just a note — it never changes the patient's care, risk level, or escalation.\n\n"
     "Consult the specialist tools (risk_reasoning, knowledge, escalation, cognitive_trend, "
     "briefing, policy_learning) as helpful for the caregiver's question, passing along the relevant "
     "situation. Then reply with a short, warm, plain-language message: acknowledge what happened, "
@@ -125,9 +142,162 @@ _ORCHESTRATOR_INSTRUCTIONS = (
 )
 
 
+# --------------------------------------------------------------------------------------------
+# Cosmos DB data access (least privilege, AAD only). Reads the same containers the edge/A2A
+# pipeline writes; writes only to the dedicated care_briefing container. Built lazily so the agent
+# still starts (and the specialist tools still work) when Cosmos is not configured.
+# --------------------------------------------------------------------------------------------
+
+_COSMOS_ENDPOINT = os.getenv("AIRACARE_COSMOS_ENDPOINT", "")
+_COSMOS_DATABASE = os.getenv("AIRACARE_COSMOS_DATABASE", "airacare")
+# Optional account key. Preferred auth is AAD/Managed Identity (no key), which works locally and
+# anywhere the running identity holds a Cosmos SQL data-plane role. The deployed Foundry hosted
+# agent authenticates as a ``ServiceIdentity`` principal that Cosmos data-plane RBAC does not
+# accept, so in that environment a key is supplied via ``AIRACARE_COSMOS_KEY`` and used as a
+# fallback. When the key is unset, the AAD path is used.
+_COSMOS_KEY = os.getenv("AIRACARE_COSMOS_KEY", "")
+_DAILY_EVENT_CONTAINER = "daily_event"
+_PATIENT_STATE_CONTAINER = "patient_state"
+_CARE_BRIEFING_CONTAINER = "care_briefing"
+
+# Shared AAD credential (also used by FoundryChatClient) and a cached Cosmos database client.
+_CREDENTIAL: DefaultAzureCredential | None = None
+_COSMOS_DB: Any = None
+
+
+def _credential() -> DefaultAzureCredential:
+    global _CREDENTIAL
+    if _CREDENTIAL is None:
+        _CREDENTIAL = DefaultAzureCredential()
+    return _CREDENTIAL
+
+
+def _cosmos_db() -> Any:
+    """Return a cached Cosmos database client, or None when Cosmos is not configured/available."""
+    global _COSMOS_DB
+    if not _COSMOS_ENDPOINT:
+        return None
+    if _COSMOS_DB is None:
+        from azure.cosmos import CosmosClient  # lazy: only needed when the data tools are used
+
+        # Key auth (fallback for the deployed hosted agent) takes precedence when a key is
+        # provided; otherwise use AAD/Managed Identity (the default, no-key path).
+        if _COSMOS_KEY:
+            client = CosmosClient(_COSMOS_ENDPOINT, credential=_COSMOS_KEY)
+        else:
+            client = CosmosClient(_COSMOS_ENDPOINT, _credential())
+        _COSMOS_DB = client.get_database_client(_COSMOS_DATABASE)
+    return _COSMOS_DB
+
+
+@tool(
+    name="fetch_recent_events",
+    description=(
+        "Look up a patient's recently filed daily-living events (privacy-scrubbed) from the care "
+        "record. Returns counts by type and considered level plus the most recent events. Use when "
+        "the caregiver asks about a specific patient's history or wants a recap grounded in data."
+    ),
+)
+def fetch_recent_events(
+    patient_id: Annotated[str, "The patient identifier, e.g. 'p-001'."],
+    days: Annotated[int, "How many days back to include (default 14)."] = 14,
+) -> str:
+    db = _cosmos_db()
+    if db is None:
+        return "The care record store is not configured, so I can't look up filed events here."
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, days))).isoformat()
+    container = db.get_container_client(_DAILY_EVENT_CONTAINER)
+    # Select only derived, scrubbed fields — never record_json / the voice-biomarker features.
+    rows = list(
+        container.query_items(
+            query=(
+                "SELECT c.type, c.considered_level, c.ts FROM c "
+                "WHERE c.patient_id = @pid AND c.ts >= @since ORDER BY c.ts DESC"
+            ),
+            parameters=[{"name": "@pid", "value": patient_id}, {"name": "@since", "value": since}],
+            partition_key=patient_id,
+        )
+    )
+    if not rows:
+        return f"No filed events for patient {patient_id} in the last {days} days."
+    by_type: dict[str, int] = {}
+    by_level: dict[str, int] = {}
+    for r in rows:
+        by_type[r.get("type", "?")] = by_type.get(r.get("type", "?"), 0) + 1
+        by_level[r.get("considered_level", "?")] = by_level.get(r.get("considered_level", "?"), 0) + 1
+    recent = "; ".join(
+        f"{r.get('ts', '?')}: {r.get('type', '?')} (considered {r.get('considered_level', '?')})"
+        for r in rows[:8]
+    )
+    types = ", ".join(f"{k}={v}" for k, v in sorted(by_type.items()))
+    levels = ", ".join(f"{k}={v}" for k, v in sorted(by_level.items()))
+    return (
+        f"Patient {patient_id}: {len(rows)} events in the last {days} days. "
+        f"By type: {types}. By considered level: {levels}. "
+        f"Most recent — {recent}."
+    )
+
+
+@tool(
+    name="fetch_patient_state",
+    description=(
+        "Look up a patient's stored profile (name, disease stage, baseline drift) from the care "
+        "record. Use to personalise tone and context for a specific patient."
+    ),
+)
+def fetch_patient_state(
+    patient_id: Annotated[str, "The patient identifier, e.g. 'p-001'."],
+) -> str:
+    db = _cosmos_db()
+    if db is None:
+        return "The care record store is not configured, so I can't look up patient details here."
+    from azure.cosmos import exceptions as cosmos_exc  # lazy
+
+    container = db.get_container_client(_PATIENT_STATE_CONTAINER)
+    try:
+        item = container.read_item(item=patient_id, partition_key=patient_id)
+    except cosmos_exc.CosmosResourceNotFoundError:
+        return f"No stored profile for patient {patient_id}."
+    name = item.get("name", "(unknown)")
+    stage = item.get("disease_stage", "moderate")
+    drift = item.get("baseline_deviation", 0.0)
+    return f"Patient {patient_id}: {name}, disease stage {stage}, baseline drift {drift:.2f}."
+
+
+@tool(
+    name="log_care_briefing",
+    description=(
+        "Save a short advisory caregiver briefing to the care record for later reference. This is "
+        "an advisory note only — it does NOT change the patient's care, risk level, or escalation. "
+        "Use after you have summarised a situation and the caregiver wants it recorded."
+    ),
+)
+def log_care_briefing(
+    patient_id: Annotated[str, "The patient identifier, e.g. 'p-001'."],
+    summary: Annotated[str, "The plain-language briefing text to store."],
+    audience: Annotated[str, "Who it is for: 'family' or 'clinician' (default 'family')."] = "family",
+) -> str:
+    db = _cosmos_db()
+    if db is None:
+        return "The care record store is not configured, so I couldn't save this briefing."
+    container = db.get_container_client(_CARE_BRIEFING_CONTAINER)
+    ts = datetime.now(timezone.utc).isoformat()
+    container.create_item(
+        {
+            "id": str(uuid.uuid4()),
+            "patient_id": patient_id,
+            "ts": ts,
+            "audience": audience,
+            "summary": summary,
+            "source": "care-orchestrator",
+        }
+    )
+    return f"Saved an advisory {audience} briefing for patient {patient_id} at {ts}."
+
+
 def _build_orchestrator(client: FoundryChatClient) -> Agent:
-    """Build the care-orchestrator agent with the six specialists wrapped as tools."""
-    tools = []
+    """Build the care-orchestrator agent with the six specialists and the data tools."""
+    tools: list[Any] = []
     for spec in _SPECIALISTS:
         specialist = Agent(
             client=client,
@@ -147,6 +317,9 @@ def _build_orchestrator(client: FoundryChatClient) -> Agent:
                 propagate_session=False,
             )
         )
+
+    # Cosmos-backed data tools (read the real care record; write only to care_briefing).
+    tools.extend([fetch_recent_events, fetch_patient_state, log_care_briefing])
 
     return Agent(
         client=client,
@@ -170,7 +343,7 @@ def main() -> None:
     client = FoundryChatClient(
         project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
         model=model_name,
-        credential=DefaultAzureCredential(),
+        credential=_credential(),
     )
 
     agent = _build_orchestrator(client)

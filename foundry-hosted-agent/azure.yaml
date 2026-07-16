@@ -33,6 +33,12 @@ services:
         environmentVariables:
             - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
               value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+            - name: AIRACARE_COSMOS_ENDPOINT
+              value: ${AIRACARE_COSMOS_ENDPOINT}
+            - name: AIRACARE_COSMOS_DATABASE
+              value: ${AIRACARE_COSMOS_DATABASE}
+            - name: AIRACARE_COSMOS_KEY
+              value: ${AIRACARE_COSMOS_KEY}
         kind: hosted
         metadata:
             tags:
