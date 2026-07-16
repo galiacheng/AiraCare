@@ -47,6 +47,25 @@ from airacare_foundry.store.base import (
 from airacare_foundry.store.local import LocalEventStore, LocalPolicyStore, seeded_local_store
 
 
+def _build_executor(kind: str):
+    """Construct the DeliberateExecutor for the configured ``deliberate.executor`` mode.
+
+    ``inline`` (default) runs T2 in-thread — deterministic for tests/demo/CI. ``thread`` runs it
+    on a background worker so ``report`` returns immediately (the hosted-server default).
+    ``agents`` runs on the Microsoft Agent Framework runtime (FH3) behind the ``[agents]`` extra;
+    the SDK is imported lazily, so selecting it without the extra raises a clear install error.
+    """
+    from airacare_foundry.agents.deliberate import InlineExecutor, ThreadExecutor
+
+    if kind == "thread":
+        return ThreadExecutor()
+    if kind == "agents":
+        from airacare_foundry.agents.agent_framework import AgentFrameworkExecutor
+
+        return AgentFrameworkExecutor()
+    return InlineExecutor()
+
+
 class CareOrchestrator:
     """Considered-assessment-first cloud gateway with an asynchronous deliberate tier.
 
@@ -92,6 +111,10 @@ class CareOrchestrator:
             return policy
         return None
 
+    def drain(self) -> None:
+        """Await any in-flight deliberate (T2) jobs — used by the server for graceful shutdown."""
+        self._deliberate.join()
+
     # -- Batch analytics (T2) — read the filed EventStore; never on the safety path. --------
 
     def cognitive_trend(self, patient_id: str) -> CognitiveTrend:
@@ -123,6 +146,7 @@ class CareOrchestrator:
             escalation=escalation,
             knowledge=knowledge,
             event_store=event_store,
+            executor=_build_executor(config.deliberate.executor),
         )
         return cls(store, deliberate=deliberate, policy_store=policy_store, event_store=event_store)
 

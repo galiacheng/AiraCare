@@ -10,10 +10,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Real multi-agent DELIBERATE tier (Monitoring / Companion / Cognitive-trend / Briefing).
-# Stubbed in this scaffold; the extra pulls the Microsoft Agent Framework when wired.
+# Real multi-agent DELIBERATE tier (Risk-Reasoning / Knowledge / Escalation / Cognitive-trend /
+# Briefing / Policy-Learning). Selected by deliberate.executor: agents; imported lazily so the
+# local inline/thread paths never need the SDK (mirrors the cosmos discipline).
 agents = [
-    "agent-framework>=0.1",
+    "agent-framework>=1.0",
 ]
 # Cosmos DB / Fabric backed PatientStateStore. azure-identity enables AAD / Managed Identity
 # auth (store.cosmos_auth: aad); the account-key path needs only azure-cosmos.

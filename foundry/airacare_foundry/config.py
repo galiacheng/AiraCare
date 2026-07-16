@@ -52,6 +52,11 @@ class PatientConfig(BaseModel):
 
 class DeliberateConfig(BaseModel):
     enabled: bool = False  # async multi-agent tier is stubbed in this scaffold
+    # How the deliberate (T2) jobs run relative to the report call:
+    #   "inline"  — run in-thread (deterministic; default for tests/demo/CI)
+    #   "thread"  — run on a background worker so report() returns immediately (hosted server)
+    #   "agents"  — run on the Microsoft Agent Framework runtime ([agents] extra; FH3)
+    executor: Literal["inline", "thread", "agents"] = "inline"
 
 
 class KnowledgeConfig(BaseModel):
