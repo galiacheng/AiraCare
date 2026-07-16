@@ -345,24 +345,33 @@ modality data ever leaves Cosmos (the fetch tool projects only derived fields); 
 sets or changes a level and writes only to `care_briefing`. The `care_briefing` container
 (pk `/patient_id`) is pre-created by the control plane (data-plane roles can't create containers).
 
-**Auth — AAD preferred, key as a documented fallback.** Locally (`azd ai agent run`) the tools use
-`DefaultAzureCredential` → your `az login`, which needs the **Cosmos DB Built-in Data Contributor**
-data-plane role (`az cosmosdb sql role assignment create --role-definition-id
-00000000-0000-0000-0000-000000000002 --principal-id <objectId> --scope /`). **Managed Identity does
-not work for the deployed Hosted Agent**: its per-agent identity is of type **`ServiceIdentity`**,
-which Cosmos data-plane RBAC rejects (`unsupported type: Unfamiliar`) — so granting it a Cosmos role
-is not possible today. The deployed agent therefore falls back to an **account key** supplied out of
-source via `azd env set AIRACARE_COSMOS_KEY <key>` (kept in the gitignored `.azure/` env, injected as
-a container env var); `main.py` uses the key when present and AAD otherwise. Add the two non-secret
-refs to the agent's `environmentVariables` in `azure.yaml`
-(`AIRACARE_COSMOS_ENDPOINT`, `AIRACARE_COSMOS_DATABASE`) plus `AIRACARE_COSMOS_KEY`, and add
-`azure-cosmos` to `requirements.txt`.
+**Auth — three tiers, no secret in the agent environment.** `main.py` resolves Cosmos auth in
+precedence order: (1) an explicit `AIRACARE_COSMOS_KEY` (dev/manual override, normally unset);
+(2) a **Key Vault**-backed key — `AIRACARE_COSMOS_KEY_VAULT_URI` + `AIRACARE_COSMOS_KEY_SECRET`,
+fetched at first use with the running identity's AAD token; (3) direct **AAD/Managed Identity** to
+Cosmos. Locally (`azd ai agent run`) tier 3 is used: `DefaultAzureCredential` → your `az login`,
+which needs the **Cosmos DB Built-in Data Contributor** data-plane role (`az cosmosdb sql role
+assignment create --role-definition-id 00000000-0000-0000-0000-000000000002 --principal-id
+<objectId> --scope /`).
+
+The deployed Hosted Agent cannot use tier 3: its per-agent identity is of type **`ServiceIdentity`**,
+which **Cosmos** data-plane RBAC rejects (`unsupported type: Unfamiliar`). Crucially, that same
+`ServiceIdentity` **is** accepted by **standard Azure RBAC**, so it uses **tier 2**: an RBAC-enabled
+Key Vault (`kv-airacare-*`) holds the Cosmos key as secret `airacare-cosmos-primary-key`; the agent
+identity is granted **Key Vault Secrets User** (scoped to the vault) and fetches the key with its
+Managed Identity at startup — **no key ever lives in the agent's environment**, only the non-secret
+vault URI + secret name. Setup: create the vault (`--enable-rbac-authorization true`), `az keyvault
+secret set` the key, grant the agent's `Instance Identity Principal ID` (`azd ai agent show`) the
+Secrets User role, then `azd env set AIRACARE_COSMOS_KEY_VAULT_URI/…_KEY_SECRET`. Add
+`AIRACARE_COSMOS_ENDPOINT`, `AIRACARE_COSMOS_DATABASE`, `AIRACARE_COSMOS_KEY_VAULT_URI`,
+`AIRACARE_COSMOS_KEY_SECRET` to the agent's `environmentVariables` in `azure.yaml`, and add
+`azure-cosmos` + `azure-keyvault-secrets` to `requirements.txt`.
 
 **Verified live** against Cosmos `airacare-5cciixoa3zpdk` (patient `p-001`, Grandpa Zhang, 41 real
-events). *Local* (AAD, `az login` creds): recap prompt → agent called `fetch_recent_events`, reported
-19 events across the window with the exact L0/L1/L2/L3 counts, restated the current considered level
-as **L0** (read from the most recent record, not invented), and wrote a `family` briefing to
-`care_briefing`. *Deployed* (key fallback, version 3): the same prompt produced the same grounded
-recap and a **second** `care_briefing` row — proving the deployed agent both reads `daily_event` and
-writes `care_briefing`.
+events). *Local* (tier 3, AAD via `az login`): recap prompt → agent called `fetch_recent_events`,
+reported the events across the window with the exact L0/L1/L2/L3 counts, restated the current
+considered level as **L0** (read from the most recent record, not invented), and wrote a `family`
+briefing to `care_briefing`. *Deployed* (tier 2, Key-Vault-backed key via MI): the same prompt
+produced the same grounded recap — proving the deployed agent fetches its key from Key Vault with its
+Managed Identity and then reads `daily_event` / writes `care_briefing`, with no secret in its env.
 

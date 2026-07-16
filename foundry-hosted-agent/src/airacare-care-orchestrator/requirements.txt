@@ -4,6 +4,8 @@ python-dotenv
 
 # Care-record data access (AAD only; read daily_event/patient_state, write care_briefing).
 azure-cosmos>=4.5.0
+# Fetch the Cosmos key from Key Vault with Managed Identity (deployed hosted agent).
+azure-keyvault-secrets>=4.7.0
 
 # debugpy enables local debugging of this agent with the Foundry Toolkit VS Code extension.
 debugpy

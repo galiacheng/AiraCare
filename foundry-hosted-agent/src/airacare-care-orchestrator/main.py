@@ -150,12 +150,20 @@ _ORCHESTRATOR_INSTRUCTIONS = (
 
 _COSMOS_ENDPOINT = os.getenv("AIRACARE_COSMOS_ENDPOINT", "")
 _COSMOS_DATABASE = os.getenv("AIRACARE_COSMOS_DATABASE", "airacare")
-# Optional account key. Preferred auth is AAD/Managed Identity (no key), which works locally and
-# anywhere the running identity holds a Cosmos SQL data-plane role. The deployed Foundry hosted
-# agent authenticates as a ``ServiceIdentity`` principal that Cosmos data-plane RBAC does not
-# accept, so in that environment a key is supplied via ``AIRACARE_COSMOS_KEY`` and used as a
-# fallback. When the key is unset, the AAD path is used.
+# Cosmos authentication, in order of precedence:
+#   1. AIRACARE_COSMOS_KEY            — an explicit account key (dev/manual override).
+#   2. Key Vault secret               — AIRACARE_COSMOS_KEY_VAULT_URI + AIRACARE_COSMOS_KEY_SECRET:
+#      the key is fetched at first use with the running identity's AAD token (Managed Identity in
+#      the container / az login locally). This is how the deployed hosted agent gets its key without
+#      any secret in its environment.
+#   3. AAD / Managed Identity direct  — used when neither of the above is set; works wherever the
+#      running identity holds a Cosmos SQL data-plane role.
+# The deployed Foundry hosted agent authenticates as a ``ServiceIdentity`` principal that Cosmos
+# data-plane RBAC rejects, so it cannot use path 3 for Cosmos; it uses path 2 (that same identity
+# *can* be granted Azure RBAC on Key Vault, so it fetches the key with MI and no secret in its env).
 _COSMOS_KEY = os.getenv("AIRACARE_COSMOS_KEY", "")
+_COSMOS_KEY_VAULT_URI = os.getenv("AIRACARE_COSMOS_KEY_VAULT_URI", "")
+_COSMOS_KEY_SECRET = os.getenv("AIRACARE_COSMOS_KEY_SECRET", "airacare-cosmos-primary-key")
 _DAILY_EVENT_CONTAINER = "daily_event"
 _PATIENT_STATE_CONTAINER = "patient_state"
 _CARE_BRIEFING_CONTAINER = "care_briefing"
@@ -172,6 +180,19 @@ def _credential() -> DefaultAzureCredential:
     return _CREDENTIAL
 
 
+def _cosmos_key() -> str:
+    """Resolve the Cosmos account key from an env override or Key Vault; '' when neither applies."""
+    if _COSMOS_KEY:
+        return _COSMOS_KEY
+    if _COSMOS_KEY_VAULT_URI:
+        # Fetch with the running identity's AAD token (Managed Identity in the container).
+        from azure.keyvault.secrets import SecretClient  # lazy: only when KV-backed key is used
+
+        secret = SecretClient(_COSMOS_KEY_VAULT_URI, _credential()).get_secret(_COSMOS_KEY_SECRET)
+        return secret.value or ""
+    return ""
+
+
 def _cosmos_db() -> Any:
     """Return a cached Cosmos database client, or None when Cosmos is not configured/available."""
     global _COSMOS_DB
@@ -180,10 +201,11 @@ def _cosmos_db() -> Any:
     if _COSMOS_DB is None:
         from azure.cosmos import CosmosClient  # lazy: only needed when the data tools are used
 
-        # Key auth (fallback for the deployed hosted agent) takes precedence when a key is
-        # provided; otherwise use AAD/Managed Identity (the default, no-key path).
-        if _COSMOS_KEY:
-            client = CosmosClient(_COSMOS_ENDPOINT, credential=_COSMOS_KEY)
+        # A resolved key (explicit or Key-Vault-backed) takes precedence; otherwise use AAD/Managed
+        # Identity directly (the default, no-key path used locally and by MI-capable identities).
+        key = _cosmos_key()
+        if key:
+            client = CosmosClient(_COSMOS_ENDPOINT, credential=key)
         else:
             client = CosmosClient(_COSMOS_ENDPOINT, _credential())
         _COSMOS_DB = client.get_database_client(_COSMOS_DATABASE)
