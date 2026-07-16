@@ -59,6 +59,19 @@ def _import_cosmos() -> tuple[Any, Any]:
         raise RuntimeError(_MISSING_SDK) from exc
 
 
+def _aad_credential() -> Any:
+    """Lazily build a DefaultAzureCredential (Managed Identity in prod, az login locally)."""
+    try:
+        from azure.identity import DefaultAzureCredential  # noqa: PLC0415
+
+        return DefaultAzureCredential()
+    except ImportError as exc:  # pragma: no cover - exercised only without the extra
+        raise RuntimeError(
+            "azure-identity is not installed. AAD auth requires the optional [cosmos] extra: "
+            '`pip install -e ".[cosmos]"`.'
+        ) from exc
+
+
 class _CosmosBase:
     """Shared Cosmos client/container bootstrap (partition key = ``/patient_id``)."""
 
@@ -69,10 +82,15 @@ class _CosmosBase:
         *,
         database: str = "airacare",
         container: str,
+        auth: str = "key",
+        tls_verify: bool = True,
     ) -> None:
         cosmos, _ = _import_cosmos()
         self._cosmos = cosmos
-        self._client = cosmos.CosmosClient(endpoint, credential)
+        cred: Any = _aad_credential() if auth == "aad" else credential
+        # connection_verify=False lets the SDK talk to the emulator's self-signed cert (localhost).
+        kwargs: dict[str, Any] = {} if tls_verify else {"connection_verify": False}
+        self._client = cosmos.CosmosClient(endpoint, cred, **kwargs)
         db = self._client.create_database_if_not_exists(id=database)
         self._container: "ContainerProxy" = db.create_container_if_not_exists(
             id=container,
@@ -90,8 +108,13 @@ class CosmosPatientStateStore(_CosmosBase):
         *,
         database: str = "airacare",
         container: str = PATIENT_STATE_CONTAINER,
+        auth: str = "key",
+        tls_verify: bool = True,
     ) -> None:
-        super().__init__(endpoint, credential, database=database, container=container)
+        super().__init__(
+            endpoint, credential, database=database, container=container,
+            auth=auth, tls_verify=tls_verify,
+        )
 
     def get(self, patient_id: str) -> PatientState | None:
         _, exc = _import_cosmos()
@@ -122,8 +145,13 @@ class CosmosPolicyStore(_CosmosBase):
         *,
         database: str = "airacare",
         container: str = EDGE_POLICY_CONTAINER,
+        auth: str = "key",
+        tls_verify: bool = True,
     ) -> None:
-        super().__init__(endpoint, credential, database=database, container=container)
+        super().__init__(
+            endpoint, credential, database=database, container=container,
+            auth=auth, tls_verify=tls_verify,
+        )
 
     def get(self, patient_id: str) -> EdgePolicyUpdate | None:
         _, exc = _import_cosmos()
@@ -154,8 +182,13 @@ class CosmosEventStore(_CosmosBase):
         *,
         database: str = "airacare",
         container: str = DAILY_EVENT_CONTAINER,
+        auth: str = "key",
+        tls_verify: bool = True,
     ) -> None:
-        super().__init__(endpoint, credential, database=database, container=container)
+        super().__init__(
+            endpoint, credential, database=database, container=container,
+            auth=auth, tls_verify=tls_verify,
+        )
 
     def append(self, record: RecordedEvent) -> None:
         self._container.create_item(

@@ -58,8 +58,12 @@ SQLite, file or `:memory:`). T1 personalizes the considered level by disease sta
 drift; `fetch_policy` serves the stored policy only when the edge is behind. Filed events land
 in `LocalEventStore` (the append-only analytics log the batch agents + Power BI read).
 `store/cosmos.py` now implements the **same** three protocols against **Azure Cosmos DB**
-(partition `/patient_id`, lazy `[cosmos]` SDK) so graduating local → Cosmos is a config flip
-(`store.backend: cosmos`), not a rewrite — see [`docs/production.md`](docs/production.md).
+(partition `/patient_id`, lazy `[cosmos]` SDK, key **or** AAD/Managed-Identity auth) so
+graduating local → Cosmos is a **verified config flip** (`store.backend: cosmos`), not a
+rewrite: `infra/cosmos.bicep` + `deploy.ps1` provision a serverless account reproducibly,
+`tests/test_cosmos_integration.py` proves the live round-trips (emulator or real account), and
+`python -m airacare_foundry.tools.demo_seed --backend cosmos` seeds the demo history. Full
+runbook in [`docs/production.md`](docs/production.md).
 
 ### Analytics & briefings
 
@@ -82,6 +86,7 @@ airacare_foundry/
   tools/            # notification/escalation timers + demo seed + Power BI export
 tests/              # parity + a2a + store + orchestrator + personalization + policy + knowledge + trend/briefing
 powerbi/            # Power BI pitch asset: generate.py -> sample_events.csv + dashboard README
+infra/              # cosmos.bicep + deploy.ps1 — reproducible serverless Cosmos provisioning
 docs/               # production.md — Cosmos/Fabric/Hosted-Agent graduation guide
 ```
 

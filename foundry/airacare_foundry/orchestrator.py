@@ -140,7 +140,8 @@ def _build_stores(
     """
     sc = config.store
     if sc.backend == "cosmos":
-        if not sc.cosmos_endpoint or not sc.cosmos_credential:
+        credential = sc.resolve_credential()
+        if not sc.cosmos_endpoint or (sc.cosmos_auth == "key" and not credential):
             raise ValueError(
                 "store.backend: cosmos requires store.cosmos_endpoint and store.cosmos_credential."
             )
@@ -150,9 +151,13 @@ def _build_stores(
             CosmosPolicyStore,
         )
 
-        kwargs = {"database": sc.cosmos_database}
+        kwargs = {
+            "database": sc.cosmos_database,
+            "auth": sc.cosmos_auth,
+            "tls_verify": sc.cosmos_tls_verify,
+        }
         state_store: PatientStateStore = CosmosPatientStateStore(
-            sc.cosmos_endpoint, sc.cosmos_credential, **kwargs
+            sc.cosmos_endpoint, credential or "", **kwargs
         )
         if state_store.get(config.patient.id) is None:
             state_store.upsert(
@@ -163,10 +168,10 @@ def _build_stores(
                 )
             )
         policy_store: PolicyStore = CosmosPolicyStore(
-            sc.cosmos_endpoint, sc.cosmos_credential, **kwargs
+            sc.cosmos_endpoint, credential or "", **kwargs
         )
         event_store: EventStore = CosmosEventStore(
-            sc.cosmos_endpoint, sc.cosmos_credential, **kwargs
+            sc.cosmos_endpoint, credential or "", **kwargs
         )
         return state_store, policy_store, event_store
 

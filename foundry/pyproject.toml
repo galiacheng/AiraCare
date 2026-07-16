@@ -15,9 +15,11 @@ dependencies = [
 agents = [
     "agent-framework>=0.1",
 ]
-# Cosmos DB / Fabric backed PatientStateStore (placeholder in this scaffold).
+# Cosmos DB / Fabric backed PatientStateStore. azure-identity enables AAD / Managed Identity
+# auth (store.cosmos_auth: aad); the account-key path needs only azure-cosmos.
 cosmos = [
     "azure-cosmos>=4.7",
+    "azure-identity>=1.17",
 ]
 # Azure AI Search vector RAG for the Knowledge agent (LocalKnowledgeBase used otherwise).
 search = [

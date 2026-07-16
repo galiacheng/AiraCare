@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +24,24 @@ class StoreConfig(BaseModel):
     cosmos_endpoint: str | None = None
     cosmos_credential: str | None = None
     cosmos_database: str = "airacare"
+    # Auth mode: "key" uses ``cosmos_credential`` (account key); "aad" ignores the key and uses
+    # azure.identity.DefaultAzureCredential (Managed Identity in prod, ``az login`` locally).
+    cosmos_auth: Literal["key", "aad"] = "key"
+    # TLS verification. True for real accounts; set False for the local emulator's self-signed
+    # cert (localhost only). NEVER disable against a real endpoint.
+    cosmos_tls_verify: bool = True
+
+    def resolve_credential(self) -> str | None:
+        """Return the account key, expanding a ``${ENV_VAR}`` reference from the environment.
+
+        Keeps secrets out of ``config.yaml``: set ``cosmos_credential: ${AIRACARE_COSMOS_KEY}``
+        (or any var name) and the real key is read from the process environment at load time.
+        A plain (non-``${...}``) value is returned as-is for local/emulator convenience.
+        """
+        raw = self.cosmos_credential
+        if raw and raw.startswith("${") and raw.endswith("}"):
+            return os.environ.get(raw[2:-1])
+        return raw
 
 
 class PatientConfig(BaseModel):

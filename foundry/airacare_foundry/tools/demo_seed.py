@@ -98,4 +98,79 @@ def to_records(
     ]
 
 
-__all__ = ["DEFAULT_PATIENT_ID", "DEFAULT_DAYS", "generate_events", "to_records"]
+def seed_event_store(
+    event_store,
+    *,
+    patient_id: str = DEFAULT_PATIENT_ID,
+    days: int = DEFAULT_DAYS,
+    end: datetime | None = None,
+    assessor: ConsideredAssessor | None = None,
+) -> int:
+    """Write ``days`` of deterministic demo history into ``event_store``; return the count.
+
+    Backend-agnostic — accepts any :class:`~airacare_foundry.store.base.EventStore`
+    (``LocalEventStore`` or ``CosmosEventStore``) so the same 30-day trajectory can seed the
+    Cosmos analytics store post-swap and light up Cognitive-Trend / Briefing / Power BI.
+    """
+    records = to_records(generate_events(patient_id, days=days, end=end), assessor=assessor)
+    for record in records:
+        event_store.append(record)
+    return len(records)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI: seed a month of demo events into the configured (local **or cosmos**) event store.
+
+    Examples::
+
+        python -m airacare_foundry.tools.demo_seed --config config.yaml --backend cosmos
+        python -m airacare_foundry.tools.demo_seed --config config.yaml --patient-id p-001 --days 30
+
+    ``--backend`` overrides ``store.backend`` from the config (e.g. seed Cosmos from a
+    local-default config). Cosmos requires the ``[cosmos]`` extra and a resolvable
+    ``store.cosmos_credential`` (set ``$env:AIRACARE_COSMOS_KEY``).
+    """
+    import argparse
+
+    from airacare_foundry.config import FoundryConfig
+    from airacare_foundry.orchestrator import _build_stores
+
+    parser = argparse.ArgumentParser(
+        prog="python -m airacare_foundry.tools.demo_seed",
+        description="Seed deterministic demo events into the configured event store.",
+    )
+    parser.add_argument("--config", required=True, help="Path to config.yaml.")
+    parser.add_argument(
+        "--backend",
+        choices=["local", "cosmos"],
+        help="Override store.backend from the config.",
+    )
+    parser.add_argument("--patient-id", default=DEFAULT_PATIENT_ID, help="Patient id to seed.")
+    parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Days of history.")
+    args = parser.parse_args(argv)
+
+    config = FoundryConfig.load(args.config)
+    if args.backend:
+        config.store.backend = args.backend
+
+    _state, _policy, event_store = _build_stores(config)
+    count = seed_event_store(event_store, patient_id=args.patient_id, days=args.days)
+    print(
+        f"Seeded {count} events for {args.patient_id} "
+        f"into the '{config.store.backend}' event store."
+    )
+    return 0
+
+
+__all__ = [
+    "DEFAULT_PATIENT_ID",
+    "DEFAULT_DAYS",
+    "generate_events",
+    "to_records",
+    "seed_event_store",
+    "main",
+]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

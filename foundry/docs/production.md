@@ -26,30 +26,87 @@ audio/video/point-cloud is ever persisted**.
 
 The Cosmos stores (`airacare_foundry/store/cosmos.py`) implement the same
 `PatientStateStore` / `PolicyStore` / `EventStore` protocols as the local ones, so nothing
-upstream changes. Flip the backend in `config.yaml`:
+upstream changes. The swap is a **verified, reproducible runbook**, not just a flag flip.
+
+### 2.1 Provision (reproducible IaC)
+
+`infra/cosmos.bicep` provisions a **serverless** Cosmos SQL account (no idle cost — ideal for
+demo/hackathon; pay per request), database `airacare`, and the three containers
+(`patient_state`, `edge_policy`, `daily_event`, all partition `/patient_id`) with a composite
+index on `daily_event (patient_id ASC, ts ASC)` for the range+order event query.
+`infra/deploy.ps1` wraps resource-group creation + deployment and prints the endpoint, key, and
+the exact config to paste (the key is **never written to disk**):
+
+```powershell
+cd foundry/infra
+./deploy.ps1 -ResourceGroup airacare-rg -Location eastus2
+# prod / provisioned throughput instead of serverless:
+# ./deploy.ps1 -ResourceGroup airacare-rg -Location eastus2 -Serverless:$false -Throughput 800
+```
+
+Verify: `az cosmosdb sql container list --account-name <acct> --resource-group airacare-rg
+--database-name airacare -o table` shows all three containers with PK `/patient_id`.
+
+The code also creates containers on demand (`create_container_if_not_exists`), so Bicep is the
+reproducible/prod path; the minimum viable manual path is just account + DB.
+
+### 2.2 Secrets — keep the key out of source
+
+`store.cosmos_credential` resolves `${VAR}` from the environment, so `config.yaml` holds only a
+reference, never the secret:
 
 ```yaml
 store:
   backend: cosmos
   cosmos_endpoint: "https://<account>.documents.azure.com:443/"
-  cosmos_credential: "<key>"        # prefer injecting from env / Key Vault, not inlining
+  cosmos_credential: "${AIRACARE_COSMOS_KEY}"   # expanded from env; nothing secret in the file
   cosmos_database: airacare
+  cosmos_auth: key           # 'key' (account key) or 'aad' (Managed Identity / az login)
+  cosmos_tls_verify: true    # set false only for the classic HTTPS emulator self-signed cert
 ```
 
-Then install the extra and run:
+```powershell
+$env:AIRACARE_COSMOS_KEY = '<primary-key>'   # or source from Key Vault in prod
+```
+
+Prefer **`cosmos_auth: aad`** in production: it builds a client from
+`azure.identity.DefaultAzureCredential` (Managed Identity on the Hosted Agent, `az login`
+locally) and ignores the key entirely — no key to store or rotate. `az cosmosdb sql role
+assignment create` grants the identity data-plane access. The `[cosmos]` extra pulls in both
+`azure-cosmos` and `azure-identity`.
+
+### 2.3 Install, flip, seed, verify
 
 ```powershell
 pip install -e ".[cosmos]"
+# seed the 30-day demo history so Cognitive-Trend / Briefing / Power BI light up post-swap:
+python -m airacare_foundry.tools.demo_seed --config config.yaml --backend cosmos
+# run the server on the Cosmos backend:
 python -m airacare_foundry.a2a_server --config config.yaml
 ```
 
-- All three containers are created on demand with **partition key `/patient_id`** — single-digit
-  ms point reads keep the report response prompt, and per-patient event queries stay in one
-  partition.
-- `CareOrchestrator.from_config` builds the Cosmos trio and upserts the configured patient if
-  the account is empty; real deployments provision patient state out of band.
+- `demo_seed --backend cosmos` writes 38 deterministic events (declining biomarker + nightly
+  wanders) via `CosmosEventStore`; `--backend` overrides `store.backend` so you can seed from a
+  local-default config.
+- The env-gated `tests/test_cosmos_integration.py` proves the real round-trips (state upsert/get,
+  policy version gate, event append + range query, trend over Cosmos). Point it at any account —
+  the **Azure Cosmos DB Emulator** (free/local) or a real one — and run:
+  ```powershell
+  $env:AIRACARE_COSMOS_ENDPOINT = "https://<account>.documents.azure.com:443/"
+  $env:AIRACARE_COSMOS_KEY = "<key>"; $env:AIRACARE_COSMOS_TLS_VERIFY = "1"
+  python -m pytest tests/test_cosmos_integration.py -v
+  ```
+  Unset `AIRACARE_COSMOS_ENDPOINT` and the suite skips, so CI stays offline-green.
+
+Notes that make the swap safe:
+- All three containers use **partition key `/patient_id`** — single-digit-ms point reads keep the
+  report response prompt, and per-patient event queries stay in one partition.
+- `CareOrchestrator.from_config` builds the Cosmos trio and upserts the configured patient if the
+  account is empty; real deployments provision patient state out of band.
 - `azure-cosmos` is imported **lazily**, so the default local demo/tests never need the SDK;
   constructing a Cosmos store without it raises a clear, actionable error.
+- Parity is untouched: `ConsideredAssessor.assess()` takes no state, so the store backend can
+  never alter the frozen edge contract (`test_report_parity.py` stays green).
 
 ## 3. Analytics without ETL: Cosmos → OneLake mirroring
 
