@@ -15,7 +15,7 @@ See also: [architecture.md](architecture.md) · [demo-scenarios.md](demo-scenari
 | 2 | Run location | **Devbox** (dev + demo); mic/speaker via RDP **Remote Audio** |
 | 3 | Local LLM | LLM interprets the *spoken reply*; event classification stays rule-based, with a keyword fast-path in front |
 | 4 | Scope | **Flagship Nighttime Wandering only**; video deferred (voice covers the multi-modal bonus) |
-| 5 | Cloud | Local **A2A stub** first, protocol-compatible so the real Foundry Hosted Agent drops in later |
+| 5 | Cloud | Local **A2A stub** for dev; the real deployed Foundry Hosted Agent is reached over **standard A2A** (`mode: foundry`) via a dedicated client |
 | 6 | Models | SAPI TTS (say) · energy VAD · faster-whisper `small` int8 (ASR) · Phi-3.5-mini via Ollama (reply understanding). Optional neural backends: Piper (TTS) + silero-VAD via `[audio-neural]` |
 | 7 | Audio config | `voice.input: mic \| file` — `mic` = Remote Audio for demo, `file` = deterministic dev |
 
@@ -40,8 +40,11 @@ recording endpoint (verified), so live mic/speaker work for a normal app.
   cloud is a **non-blocking background side-effect** (a worker thread) with
   store-and-forward. A local queue + fallback prove the "cable-pull" independence — the
   safety action never waits on the report.
-- **A2A drop-in:** the local stub speaks the same message contract as the real Foundry
-  agent; switching is an endpoint/credential change.
+- **Cloud clients (three modes):** `mode: stub` is an in-process gateway; `mode: a2a` is a bespoke
+  JSON-RPC client to the local `a2a_stub` server (dev drop-in); `mode: foundry` is a **standard-A2A**
+  client (`message/send` + task poll, Entra bearer) to the **real deployed Foundry Hosted Agent**.
+  The local stub is a dev stand-in — it is **not** wire-identical to the Foundry path; switching to
+  Foundry is an endpoint/credential change plus selecting `mode: foundry`.
 
 ## 3. Repo & module layout
 
@@ -76,9 +79,10 @@ edge/
     cloud/
       contracts.py          # DailyLivingEvent, CloudAssessment, EdgePolicyUpdate (pydantic)
       stub.py               # in-process LocalCloudStub (report + fetch_policy)
-      a2a_client.py         # A2A/JSON-RPC client (local stub or Foundry)
-      a2a_stub.py           # local A2A server (Foundry stand-in)
-      factory.py            # build the CloudGateway from config
+      a2a_client.py         # bespoke JSON-RPC client to the local a2a_stub (mode: a2a)
+      a2a_stub.py           # local A2A server (dev stand-in; mode: a2a)
+      foundry_client.py     # standard-A2A client to the deployed Foundry Hosted Agent (mode: foundry)
+      factory.py            # build the CloudGateway from config (stub | a2a | foundry)
       reporter.py           # background report worker (non-blocking; off the FSM)
       queue.py              # offline store-and-forward queue
     ui/

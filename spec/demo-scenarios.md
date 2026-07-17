@@ -35,10 +35,11 @@ leaves the home — only structured `DailyLivingEvent` objects are uploaded.**
    *(Raw audio/video never leaves the home; the report is fire-and-forget.)*
 
 **Foundry (cloud · async — does not gate the action)**
-6. Receives the reported event; Monitoring / Companion / Cognitive-trend / Briefing agents
-   fuse it with history + disease stage → a **considered assessment** + an explainable
-   family briefing ("3rd nighttime wander this week — escalating"). May refine the record
-   and issue an **EdgePolicyUpdate** (e.g. lower the night threshold).
+6. Receives the reported event; risk-reasoning / knowledge / cognitive-trend / briefing
+   specialists fuse it with history + disease stage → a **considered assessment** + an explainable
+   family briefing ("3rd nighttime wander this week — escalating"). *(Design target: refine the
+   record and issue an **EdgePolicyUpdate** — e.g. lower the night threshold; the current deployed
+   agent narrates only and emits no policy update.)*
 
 **Why hybrid:** detection, judgment, and first response must be instant and offline — so
 the **edge** decides and acts on its own. The **cloud** adds fused context, caregiver
@@ -61,7 +62,8 @@ never left the house.
   ("are you okay?" + no-response timeout); a sensor-event injector simulates
   out-of-bed + door-open. Edge uploads only JSON events.
 - **Foundry agent:** one orchestrator that fuses the reported event + disease-stage +
-  history → a **considered assessment** + explainable briefing + (optional) EdgePolicyUpdate.
+  history → a **considered assessment** + explainable briefing *(EdgePolicyUpdate is a design
+  target — the deployed agent does not emit one)*.
 - **Split-screen panel:** the **edge's** immediate decision/action vs. the cloud's
   considered assessment, side by side; highlight **"raw data never went to the cloud"** and
   **"the edge acted without waiting."**
@@ -176,8 +178,8 @@ Keep scope tight; use simulators, not real hardware.
    simulated sensor-event injector fires out-of-bed + door-open. Edge uploads only JSON
    events.
 3. **Foundry agent (async):** orchestrator fuses the reported event + disease stage →
-   considered assessment + explainable briefing (+ optional EdgePolicyUpdate). The edge
-   already decided and acted.
+   considered assessment + explainable briefing *(EdgePolicyUpdate is a design target, not
+   emitted by the deployed agent)*. The edge already decided and acted.
 4. **Split-screen panel:** the edge's immediate decision + action vs. the cloud's
    considered assessment; highlight **"raw data never went to the cloud"** and **"the edge
    acted without waiting."**

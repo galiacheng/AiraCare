@@ -25,7 +25,7 @@ that tunes the edge's future behavior.
 | 2 | Multi-agent | **Foundry Connected Agents** for the deliberate (T2) orchestration |
 | 3 | Latency strategy | **Off the safety path** — the edge already acted. The report returns a quick **considered assessment** (records + immediate caregiver comms); deep reasoning, the escalation ladder, trends, and policy learning run **asynchronously** (T2). |
 | 4 | Knowledge | **Foundry IQ** knowledge base — *agentic* RAG over care guidelines (documents indexed in Azure AI Search with `text-embedding-3-small` vectors + hybrid retrieval, `gpt-5.4` as the query planner); the `search_care_guidelines` tool returns **cited** snippets. *(Built on Azure AI Search under the hood, but Foundry IQ owns the retrieval — see `foundry-hosted-agent/knowledge/`.)* |
-| 5 | Models | The **T1 considered assessment is deterministic / rule-based (no model)** — it must be reproducible on the safety-adjacent path. Only the **T2 advisory narrative** (the hosted conversational agent + its six connected specialists) uses an LLM: **`gpt-5.4`** (`gpt-5.4-mini` for lighter deploys). The model never sets or changes the risk level. |
+| 5 | Models | The **T1 considered assessment is deterministic / rule-based (no model)** — it must be reproducible on the safety-adjacent path. Only the **T2 advisory narrative** (the hosted conversational agent + its five connected specialists) uses an LLM: **`gpt-5.4`** (`gpt-5.4-mini` for lighter deploys). The model never sets or changes the risk level. |
 | 6 | Data (see §7) | **Demo/MVP = local store (SQLite/in-memory)**; **production target = Cosmos DB (operational) mirrored into Microsoft Fabric/OneLake for analytics + Power BI** |
 | 7 | Notifications | **Cloud-owned** enriched dispatch + timed ack-tracked escalation ladder (the edge already fired its own immediate local alert + SMS to kin) |
 | 8 | Drop-in | Same A2A `airacare.report` / `airacare.fetch_policy` contract → edge switches via `cloud.mode: foundry` only |
@@ -52,12 +52,21 @@ patient-facing action, which already happened on the edge.
 >   *reads* the same Cosmos `daily_event` store the hosted agent writes. Read-only; off the safety
 >   path.
 >
-> Divergences from the original decisions above, now folded in: Knowledge moved from raw
-> Azure AI Search to **Foundry IQ** (#4); models are **`gpt-5.4`/`gpt-5.4-mini`**, not GPT-4o
+> Divergences from the original decisions above, now folded in: the deployed agent speaks the
+> **standard A2A wire** (`message/send` + `tasks/get`), **not** the bespoke `airacare.report` /
+> `airacare.fetch_policy` JSON-RPC in §3/§13 below — that framing describes the retired local stub,
+> which the edge still uses in `cloud.mode: a2a`. The **control-plane policy channel is not built on
+> the deployed path**: `fetch_policy` is a no-op and the hosted agent always reports
+> `policy_version = 1`, so the edge never pulls an `EdgePolicyUpdate` (policy learning, §8/#8/#9,
+> remains a **design target only**; the edge + local stub still model it end-to-end). The T2
+> orchestration is **five** MAF specialist sub-agents exposed **as tools** (risk-reasoning, knowledge,
+> escalation, cognitive-trend, briefing) under one `care-orchestrator` Agent — not six, and not
+> Foundry "Connected Agents" in the portal sense; policy-learning was dropped. Knowledge moved from
+> raw Azure AI Search to **Foundry IQ** (#4); models are **`gpt-5.4`/`gpt-5.4-mini`**, not GPT-4o
 > (#5); analytics is a **self-hosted live dashboard** rather than Power BI on OneLake (#6, still the
 > stated production target); and the deterministic assessment/escalation that once lived in a
 > separate A2A server now runs **inside the hosted agent** as pre-model middleware. The frozen edge
-> report contract is unchanged.
+> report contract (`airacare.report` → `CloudAssessment`) is unchanged.
 
 ## 2. Design principles
 
@@ -339,14 +348,17 @@ The `contracts.py` in each folder stays byte-compatible with `edge/airacare_edge
 6. Swap edge `cloud.mode: foundry`, run the **demo-runbook** end-to-end against real
    Foundry.
 
-> **Status (2026-07): all six done, plus the cloud graduation.** The A2A drop-in ships the
-> flagship parity, personalization, async escalation ladder, knowledge grounding, trend +
-> briefing, and the edge flip (proven e2e). Beyond the MVP: the conversational agent is
-> **deployed to Azure AI Foundry Agent Service** on `gpt-5.4` with a **Foundry IQ** KB;
-> events persist to **Cosmos DB via Managed Identity**; there is an **agent evaluation
-> suite** and a **live dashboard verified against live Cosmos**. Still stated-but-deferred:
-> Fabric/OneLake mirroring, Power BI on OneLake, Data Activator, a real GeofenceTool, and
-> real streaming voice-biomarker extraction (§9).
+> **Status (2026-07): all six done, plus the cloud graduation.** The deterministic core ships the
+> flagship parity, personalization, async escalation ladder, knowledge grounding, and trend +
+> briefing, and the edge flip is proven e2e. Beyond the MVP: that deterministic logic now runs
+> **inside the deployed hosted agent** as pre-model middleware (the standalone A2A drop-in server was
+> retired), reached over **standard A2A**; the conversational agent is **deployed to Azure AI Foundry
+> Agent Service** on `gpt-5.4` with a **Foundry IQ** KB; events persist to **Cosmos DB via Managed
+> Identity**; there is an **agent evaluation suite** and a **live dashboard verified against live
+> Cosmos**. Not built on the deployed path: the **policy-learning / `EdgePolicyUpdate` control-plane
+> channel** (design-only; retired with the standalone server). Still stated-but-deferred:
+> Fabric/OneLake mirroring, Power BI on OneLake, Data Activator, a real GeofenceTool, and real
+> streaming voice-biomarker extraction (§9).
 
 ## 12. Mapping to the challenge criteria
 
@@ -354,10 +366,10 @@ The `contracts.py` in each folder stays byte-compatible with `edge/airacare_edge
 |---|---|
 | Deep reasoning & planning | Risk-Reasoning agent; disease-stage × baseline × fusion policy |
 | Enterprise knowledge access | Knowledge specialist → **Foundry IQ** KB (agentic RAG over Azure AI Search, cited snippets) |
-| Multi-agent orchestration | Care Orchestrator + six Connected Agents on the Microsoft Agent Framework (§5), deployed to Agent Service |
+| Multi-agent orchestration | Care Orchestrator + five specialist sub-agents exposed as tools on the Microsoft Agent Framework (§5), deployed to Agent Service |
 | Toolboxes / Skills / Hosted Agents | Notify/Geofence/EscalationTimer tools; `search_care_guidelines` + Cosmos data tools; Hosted Agent runtime |
 | Complex multi-modal understanding | fused event streams + longitudinal voice-biomarker modeling (§9) |
-| Long-running autonomous | ack-tracked escalation ladder + batch trend/briefing + policy learning (T2, §8) |
+| Long-running autonomous | ack-tracked escalation ladder + batch trend/briefing (T2, §8); policy learning is a design target only |
 | Token-frugal | the considered-assessment policy is cheap (no model); LLM/RAG only on real events; analytics is compute |
 | Vertical template / biz potential | `DailyLivingEvent` one-engine model + the **live care dashboard** (Fabric/Power BI is the production target) |
 
@@ -367,8 +379,12 @@ No edge code change — config only:
 ```yaml
 cloud:
   mode: foundry
-  a2a_endpoint: "https://<foundry-hosted-agent-endpoint>/a2a"
+  a2a_endpoint: "https://<foundry-hosted-agent-endpoint>/.../protocols/a2a"
+  a2a_token: "${AIRACARE_A2A_TOKEN}"   # or DefaultAzureCredential fallback
 ```
-The edge already speaks `airacare.report` → `CloudAssessment` and `airacare.fetch_policy`
-→ `EdgePolicyUpdate`; point it at the real endpoint and provide credentials. The local
-`a2a_stub` and this Foundry agent are wire-identical.
+`mode: foundry` uses the **standard-A2A** `FoundryA2AClient` (`message/send` + `tasks/get`, Entra
+auth), which forwards the event and parses the deterministic `CONSIDERED ASSESSMENT (JSON)` block
+back into a `CloudAssessment`. This is **not** wire-identical to the local `a2a_stub` (that stub
+speaks the bespoke `airacare.report` JSON-RPC and is what `cloud.mode: a2a` targets). On the Foundry
+path `fetch_policy` is a no-op — the hosted agent has no control-plane policy channel — so the edge
+never pulls an `EdgePolicyUpdate`.

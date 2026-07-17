@@ -145,6 +145,10 @@ back to the edge — tuning future behavior, never gating the current action.
    `policy_version`, and the edge lazily pulls a new `EdgePolicyUpdate` only when it
    changes (no per-event policy, no blind polling). One capture serves both caregiver
    briefings and edge personalization.
+   > **As built:** loop 3 is fully modeled by the **edge + local stub** (`cloud.mode: stub` / `a2a`),
+   > but the **deployed Foundry hosted agent has no control-plane policy channel** — `fetch_policy`
+   > is a no-op and it always reports `policy_version = 1`, so the edge never pulls an update. Policy
+   > learning remains a **design target** on the direct-A2A topology (see §8).
 
 ---
 

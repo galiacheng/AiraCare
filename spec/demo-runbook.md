@@ -120,7 +120,7 @@ cd foundry-hosted-agent
 azd ai agent invoke "Give me a short recap of last night for the family."
 ```
 **Say:** *"The edge already acted. Asynchronously, the same hosted agent that graded the event
-deterministically also consults six specialists, grounds its advice in a **Foundry IQ** knowledge
+deterministically also consults five specialists, grounds its advice in a **Foundry IQ** knowledge
 base with citations, and returns a warm family briefing. It never sets the risk level — the
 deterministic middleware does, and the edge remains the sole safety authority."*
 
@@ -248,7 +248,7 @@ wrote via its persistence middleware.
 | Token-frugal, autonomous | Keyword fast-path filters the obvious; LLM only on ambiguous; edge runs 24/7 mostly silent |
 | Faster / smarter / more trustworthy | Fast (edge decides + acts in ms), smart (LLM + async cloud fusion + policy feedback), trustworthy (privacy boundary) |
 | Reliability | Edge always acts; report store-and-forward re-syncs when the cloud returns |
-| Deep cloud reasoning (async) | Beat 5 — hosted agent on `gpt-5.4` + six specialists + **Foundry IQ** grounded, cited advice; writes to Cosmos via Managed Identity |
+| Deep cloud reasoning (async) | Beat 5 — hosted agent on `gpt-5.4` + five specialists + **Foundry IQ** grounded, cited advice; writes to Cosmos via Managed Identity |
 | Population health / biz potential | Beat 6 — the **live care dashboard** over the same Cosmos events (trend, event mix, escalation funnel, nighttime risk) |
 | Vertical template | `DailyLivingEvent` unified model → add a `type` to cover meds, falls, meals — no new system |
 

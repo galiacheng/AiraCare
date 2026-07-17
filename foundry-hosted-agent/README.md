@@ -21,9 +21,15 @@ safety framing in `src/airacare-care-orchestrator/main.py` (the `ConsideredAsses
 
 ```
 foundry-hosted-agent/
-├─ azure.yaml                         # azd + microsoft.foundry: model deployment + hosted agent
+├─ azure.yaml                         # azd + microsoft.foundry: model deployment + hosted agent (protocols: [a2a, responses])
+├─ pyproject.toml                     # offline test/lint config for the ported deterministic core
+├─ knowledge/                         # care-guideline corpus + Foundry IQ knowledge-base setup
+├─ infra/                             # provisioning helpers (e.g. provision_foundry_iq.py)
+├─ tests/                             # offline tests: considered assessor, escalation, render
 └─ src/airacare-care-orchestrator/
-   ├─ main.py                         # orchestrator + five specialists (as tools) via FoundryChatClient
+   ├─ main.py                         # the agent: deterministic middleware + orchestrator/narrator (5 specialists as tools) via FoundryChatClient
+   ├─ airacare_care/                  # ported deterministic core (assessor, escalation, state, notify, render, contracts)
+   ├─ eval/ · evaluators/             # agent evaluation suite (golden set + rubric)
    ├─ requirements.txt                # agent-framework-foundry(+hosting), python-dotenv, debugpy
    ├─ Dockerfile                      # python:3.12-slim, EXPOSE 8088, CMD python main.py
    ├─ .env.example                    # FOUNDRY_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME

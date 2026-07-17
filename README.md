@@ -31,9 +31,9 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
 | [`spec/architecture.md`](spec/architecture.md) | Architecture, data flow, `DailyLivingEvent`, graded response ladder |
 | [`spec/demo-scenarios.md`](spec/demo-scenarios.md) | Flagship + roadmap scenarios |
 | [`spec/edge-design.md`](spec/edge-design.md) | Edge agent design (frameworks, models, state machine, voice pipeline) |
-| [`spec/foundry-design.md`](spec/foundry-design.md) | Foundry Care Orchestrator design (async considered assessment, connected agents, escalation, policy feedback, data layer) |
+| [`spec/foundry-design.md`](spec/foundry-design.md) | Foundry Care Orchestrator design (async considered assessment, specialist tools, escalation, data layer; with an "as built" reconciliation) |
+| [`spec/foundry-a2a-hosting.md`](spec/foundry-a2a-hosting.md) | How the hosted agent exposes **standard A2A** and preserves determinism (enablement runbook + design note) |
 | [`spec/demo-runbook.md`](spec/demo-runbook.md) | **Step-by-step demo script** |
-| [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
 | [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
 | [`foundry-hosted-agent/`](foundry-hosted-agent/) | Foundry **hosted agent** (`airacare-care-orchestrator`) — deterministic considered assessment + escalation + Cosmos write, deployed on Azure AI Foundry Agent Service; see [`foundry-hosted-agent/README.md`](foundry-hosted-agent/README.md) |
 | [`dashboard/`](dashboard/) | Standalone **care dashboard** (Python) reading the filed events from Cosmos — see [`dashboard/README.md`](dashboard/README.md) |

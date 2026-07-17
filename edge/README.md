@@ -22,7 +22,8 @@ Implemented so far:
   `VoiceService`/`CloudGateway`/`AlertSink` protocols), in-process cloud stub, unit tests.
 - **Step 2** — `cli.py`: interactive scenario runner with a printed privacy panel.
 - **Step 3** — A2A network path: `cloud/a2a_stub.py` + `cloud/a2a_client.py` +
-  `cloud/factory.py` (drop-in for the real Foundry Hosted Agent).
+  `cloud/factory.py` (local dev stub for `mode: a2a`). The **real deployed Foundry Hosted Agent** is
+  reached over **standard A2A** by `cloud/foundry_client.py` (`mode: foundry`).
 - **Step 4** — real voice I/O behind `VoiceService` (`voice/`): SAPI TTS (`say`),
   mic → energy-VAD → faster-whisper (`listen`), keyword `interpret`.
 - **Step 5** — `voice/llm.py` Ollama reply-understanding for *ambiguous* replies
