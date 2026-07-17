@@ -24,8 +24,8 @@ that tunes the edge's future behavior.
 | 1 | Runtime | **Azure AI Foundry Agent Service** — Care Orchestrator as a **Hosted Agent** |
 | 2 | Multi-agent | **Foundry Connected Agents** for the deliberate (T2) orchestration |
 | 3 | Latency strategy | **Off the safety path** — the edge already acted. The report returns a quick **considered assessment** (records + immediate caregiver comms); deep reasoning, the escalation ladder, trends, and policy learning run **asynchronously** (T2). |
-| 4 | Knowledge | **Azure AI Search** RAG over care guidelines / clinical protocols |
-| 5 | Models | GPT-4o-mini for the considered assessment + most sub-agents; GPT-4o for hard reasoning |
+| 4 | Knowledge | **Foundry IQ** knowledge base — *agentic* RAG over care guidelines (documents indexed in Azure AI Search with `text-embedding-3-small` vectors + hybrid retrieval, `gpt-5.4` as the query planner); the `search_care_guidelines` tool returns **cited** snippets. *(Built on Azure AI Search under the hood, but Foundry IQ owns the retrieval — see `foundry-hosted-agent/knowledge/`.)* |
+| 5 | Models | The **T1 considered assessment is deterministic / rule-based (no model)** — it must be reproducible on the safety-adjacent path. Only the **T2 advisory narrative** (the hosted conversational agent + its six connected specialists) uses an LLM: **`gpt-5.4`** (`gpt-5.4-mini` for lighter deploys). The model never sets or changes the risk level. |
 | 6 | Data (see §7) | **Demo/MVP = local store (SQLite/in-memory)**; **production target = Cosmos DB (operational) mirrored into Microsoft Fabric/OneLake for analytics + Power BI** |
 | 7 | Notifications | **Cloud-owned** enriched dispatch + timed ack-tracked escalation ladder (the edge already fired its own immediate local alert + SMS to kin) |
 | 8 | Drop-in | Same A2A `airacare.report` / `airacare.fetch_policy` contract → edge switches via `cloud.mode: foundry` only |
@@ -36,6 +36,24 @@ real-time budget on the safety path**. The report call still returns promptly (t
 report worker uses a ~5 s timeout, then falls back to the store-and-forward queue), but a
 slow or missing response only delays *records and caregiver enrichment* — never the
 patient-facing action, which already happened on the edge.
+
+> **As built (2026-07 — reconciled to reality).** The cloud is implemented across **two
+> folders**, both live:
+> - **`foundry-a2a-server/`** — the deterministic **A2A drop-in** that speaks the frozen
+>   `airacare.report` / `airacare.fetch_policy` contract. Pure Python (no LLM on this path),
+>   runs offline/CI, writes derived `DailyLivingEvent`s to **Cosmos DB via Managed Identity**,
+>   and powers the **live care dashboard** (`airacare_foundry/dashboard/`, stdlib server +
+>   Chart.js). This is the safety-adjacent records path.
+> - **`foundry-hosted-agent/`** — the **deployed Azure AI Foundry Agent Service** conversational
+>   surface (Responses protocol): an orchestrator + **six connected specialists** on the
+>   Microsoft Agent Framework running on **`gpt-5.4`**, grounded by a **Foundry IQ** knowledge
+>   base, reading the same Cosmos events/state. It is **advisory / narrative only** and never
+>   sets the risk level or triggers escalation.
+>
+> Divergences from the original decisions above, now folded in: Knowledge moved from raw
+> Azure AI Search to **Foundry IQ** (#4); models are **`gpt-5.4`/`gpt-5.4-mini`**, not GPT-4o
+> (#5); and analytics is a **self-hosted live dashboard** rather than Power BI on OneLake (#6,
+> still the stated production target). The frozen edge contract is unchanged.
 
 ## 2. Design principles
 
@@ -154,13 +172,13 @@ flowchart TD
     T1 -->|"CloudAssessment (records + caregiver comms)"| edge
     edge -.->|"airacare.fetch_policy (lazy, on version bump)"| policy
     policy -.->|"EdgePolicyUpdate"| edge
-    know -->|vector RAG| search[("Azure AI Search<br/>care-guideline KB")]
+    know -->|agentic RAG · cited| search[("Foundry IQ KB<br/>over Azure AI Search vectors")]
     esc -->|"family → community → emergency"| ladder(["Escalation ladder"])
     esc -.uses.-> notify
     esc -.uses.-> timer
     risk -.uses.-> geo
     learn -.writes.-> policy
-    brief -.->|reports| report(["Power BI / family briefing"])
+    brief -.->|reports| report(["Live dashboard / family briefing"])
 ```
 
 ## 6. Assessment policy (how the considered level is decided)
@@ -202,10 +220,10 @@ Fabric mirror handle analytics with no ETL:
 | Offline event backlog | **edge disk** `.airacare_queue/` (TTL-bounded) | already built |
 | **Patient State** (baseline, stage, contacts, history) | **Azure Cosmos DB**, partition = `patient_id` | single-digit-ms → keeps the report response prompt |
 | **Edge policy** (versioned per patient) | **Azure Cosmos DB**, partition = `patient_id` | served by `fetch_policy`; edge pulls on a `policy_version` bump |
-| Analytics / trends / longitudinal modeling | **Microsoft Fabric** (Eventhouse/KQL + Lakehouse/Delta, Spark) via **Cosmos→OneLake mirroring** | zero-copy, no ETL |
-| Family daily / clinician monthly reports | **Power BI** on OneLake | native dashboards |
-| Condition-based alert triggers | **Data Activator** | complements the agent's escalation ladder |
-| Care-guidelines KB (RAG) | **Azure AI Search** (vector) | enterprise knowledge, kept separate from patient data |
+| Analytics / trends / longitudinal modeling | **Microsoft Fabric** (Eventhouse/KQL + Lakehouse/Delta, Spark) via **Cosmos→OneLake mirroring** | zero-copy, no ETL *(stated production target — not built; superseded for the demo by the live dashboard below)* |
+| Family daily / clinician monthly reports | **Live care dashboard** (`airacare_foundry/dashboard/`, stdlib server + Chart.js) reading the same EventStore; Power BI on OneLake is the stated production target | native dashboards |
+| Condition-based alert triggers | **Data Activator** | complements the agent's escalation ladder *(stated production target — not built)* |
+| Care-guidelines KB (RAG) | **Foundry IQ** knowledge base (agentic retrieval over Azure AI Search vectors, `gpt-5.4` planner) | enterprise knowledge, kept separate from patient data; returns **cited** snippets |
 
 **Why C for the hackathon:** standing up the full Fabric stack is hours of infra a judge
 never sees and adds live-demo failure surface. Cosmos→OneLake **mirroring means
@@ -248,29 +266,35 @@ Because raw modality data stays on the edge, Foundry's multi-modal understanding
   features** into a cognitive trajectory (this hits the multi-modal / streaming-plus-batch
   bonus). Heavy modeling is **compute, not tokens** — keeps the agent frugal.
 
-## 10. Proposed repo / module layout (`foundry-a2a-server/`)
+## 10. Repo / module layout — as built
+
+**Two cloud folders** (both live):
 
 ```
-foundry-a2a-server/
+foundry-a2a-server/              # the deterministic A2A drop-in + Cosmos writer + live dashboard
   pyproject.toml
-  config.yaml                    # models, AI Search endpoint, store mode (local|cosmos), contacts
+  config.yaml                    # models, store mode (local|cosmos), contacts (Foundry IQ lives in foundry-hosted-agent/)
   airacare_foundry/
     a2a_server.py                # A2A/JSON-RPC: airacare.report -> CloudAssessment + airacare.fetch_policy -> EdgePolicyUpdate (drop-in for a2a_stub)
     orchestrator.py              # Care Orchestrator: T1 considered assessment + enqueue T2
+    dashboard/                   # AS BUILT: live care dashboard (stdlib http.server + Chart.js) reading the EventStore (local|cosmos)
     assess/
-      assessor.py                # patient-state-aware considered-level policy (parity+ with stub)
+      assessor.py                # patient-state-aware considered-level policy (parity+ with stub); IS the "risk-reasoning" logic
       policy.py                  # L0–L3 thresholds × disease stage
     agents/                      # T2 Connected Agents
-      risk_reasoning.py
-      knowledge.py               # Azure AI Search RAG
+      # risk_reasoning: folded into assess/assessor.py; surfaced as the "risk-reasoning" connected agent in agent_framework.py
+      agent_framework.py         # AS BUILT: MAF executor + connected-agent/tool specs (the hosted-agent brain)
+      knowledge.py               # local in-memory RAG (offline demo/CI); prod = Foundry IQ KB (foundry-hosted-agent/knowledge/)
       escalation.py              # ack-tracked ladder
       cognitive_trend.py         # batch modeling
       briefing.py                # family/clinician reports
       policy_learning.py         # distills EdgePolicyUpdate (version++)
     tools/
-      notify.py                  # push/SMS
-      geofence.py
+      notify.py                  # push/SMS (also backs the geofence placeholder)
+      # geofence: placeholder only (descriptor wraps notify); real GeofenceTool not yet built
       escalation_timer.py
+      demo_seed.py               # AS BUILT: seeds the 30-day demo history (local|cosmos)
+      powerbi_export.py          # AS BUILT: record_to_row CSV export (Power BI pitch asset)
     store/
       base.py                    # PatientStateStore + PolicyStore protocols
       local.py                   # SQLite/in-memory (MVP)  ← used for the demo
@@ -280,6 +304,14 @@ foundry-a2a-server/
     test_report_parity.py        # returns the same CloudAssessment as the stub for the flagship
     test_fetch_policy.py         # fetch_policy returns EdgePolicyUpdate only when version changed
     test_escalation_ladder.py
+    test_dashboard.py            # AS BUILT: dashboard data layer + HTTP endpoints
+
+foundry-hosted-agent/            # the DEPLOYED Azure AI Foundry Agent Service conversational surface
+  azure.yaml                     # azd + microsoft.foundry: model deployment + hosted agent
+  knowledge/                     # care-guideline corpus + Foundry IQ knowledge-base setup
+  src/airacare-care-orchestrator/
+    main.py                      # orchestrator + six specialists (as tools) on gpt-5.4 via FoundryChatClient
+    eval/ · evaluators/          # AS BUILT: agent evaluation suite (golden set + rubric)
 ```
 
 `contracts.py` must stay byte-compatible with `edge/airacare_edge/cloud/contracts.py`
@@ -294,24 +326,36 @@ foundry-a2a-server/
    considered assessment.
 3. **Async escalation ladder** (family→community→emergency + ack timers) — the
    long-running story.
-4. **Knowledge agent** (Azure AI Search) → grounded advice woven into `reason`/briefing.
-5. **Cognitive-Trend + Briefing agents** (batch) → one **Power BI** clinician dashboard
-   from exported events (pitch asset).
+4. **Knowledge agent** → grounded advice woven into `reason`/briefing. *(As built: local
+   in-memory RAG for the offline demo; production graduated to a **Foundry IQ** knowledge
+   base — agentic RAG over Azure AI Search — in `foundry-hosted-agent/`.)*
+5. **Cognitive-Trend + Briefing agents** (batch) → clinician/family reporting. *(As built:
+   a **live care dashboard** — `airacare_foundry/dashboard/`, stdlib server + Chart.js —
+   reading the same EventStore; plus a Power BI CSV export as a static pitch asset.)*
 6. Swap edge `cloud.mode: foundry`, run the **demo-runbook** end-to-end against real
    Foundry.
+
+> **Status (2026-07): all six done, plus the cloud graduation.** The A2A drop-in ships the
+> flagship parity, personalization, async escalation ladder, knowledge grounding, trend +
+> briefing, and the edge flip (proven e2e). Beyond the MVP: the conversational agent is
+> **deployed to Azure AI Foundry Agent Service** on `gpt-5.4` with a **Foundry IQ** KB;
+> events persist to **Cosmos DB via Managed Identity**; there is an **agent evaluation
+> suite** and a **live dashboard verified against live Cosmos**. Still stated-but-deferred:
+> Fabric/OneLake mirroring, Power BI on OneLake, Data Activator, a real GeofenceTool, and
+> real streaming voice-biomarker extraction (§9).
 
 ## 12. Mapping to the challenge criteria
 
 | Foundry capability the challenge asks for | Where it lives here |
 |---|---|
 | Deep reasoning & planning | Risk-Reasoning agent; disease-stage × baseline × fusion policy |
-| Enterprise knowledge access | Knowledge agent → Azure AI Search (care guidelines) |
-| Multi-agent orchestration | Care Orchestrator + Connected Agents (§5) |
-| Toolboxes / Skills / Hosted Agents | Notify/Geofence/EscalationTimer tools; Hosted Agent runtime |
+| Enterprise knowledge access | Knowledge specialist → **Foundry IQ** KB (agentic RAG over Azure AI Search, cited snippets) |
+| Multi-agent orchestration | Care Orchestrator + six Connected Agents on the Microsoft Agent Framework (§5), deployed to Agent Service |
+| Toolboxes / Skills / Hosted Agents | Notify/Geofence/EscalationTimer tools; `search_care_guidelines` + Cosmos data tools; Hosted Agent runtime |
 | Complex multi-modal understanding | fused event streams + longitudinal voice-biomarker modeling (§9) |
 | Long-running autonomous | ack-tracked escalation ladder + batch trend/briefing + policy learning (T2, §8) |
-| Token-frugal | the considered-assessment policy is cheap; LLM/RAG only on real events; analytics is compute |
-| Vertical template / biz potential | `DailyLivingEvent` one-engine model + Fabric/Power BI population-health story |
+| Token-frugal | the considered-assessment policy is cheap (no model); LLM/RAG only on real events; analytics is compute |
+| Vertical template / biz potential | `DailyLivingEvent` one-engine model + the **live care dashboard** (Fabric/Power BI is the production target) |
 
 ## 13. Switching the edge from stub → Foundry
 

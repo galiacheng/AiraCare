@@ -5,9 +5,13 @@ The demo shows the three pitch anchors — **hybrid division of labor**, the **p
 boundary**, and **graded escalation** — plus **real-time voice**, **on-device LLM
 understanding**, and **offline resilience (store-and-forward)**.
 
-> Cloud side note: the Foundry-hosted **Care Orchestrator** agent is owned by another
-> team member. This run-book demos the **edge** against a local **A2A stub** that speaks
-> the same contract; switching to real Foundry is config-only (`cloud.mode: foundry`).
+> **Cloud side (now built — same repo).** The Foundry **Care Orchestrator** is implemented
+> and deployed: a deterministic **A2A drop-in** (`foundry-a2a-server/`) that speaks the frozen
+> contract and writes to Cosmos, plus a **deployed Azure AI Foundry Agent Service**
+> conversational agent (`foundry-hosted-agent/`) on `gpt-5.4` with a Foundry IQ knowledge base.
+> Beats 1–4 below demo the **edge** against a local A2A stub (fast + offline-safe); **Beats 5–6**
+> add the live cloud agent and the care dashboard. Switching the edge to real Foundry is
+> config-only (`cloud.mode: foundry`).
 
 ---
 
@@ -103,6 +107,35 @@ python -m airacare_edge.cli --scenario reply-ok --cloud a2a
 **Say:** *"The moment the cloud is reachable again, the edge **re-syncs** the queued event
 automatically."* → look for `🔁 re-synced 1 queued event(s)`.
 
+### Beat 5 — The cloud thinks (live Foundry Agent Service)
+Show the async cloud depth the edge never waits on. Two options:
+
+```powershell
+# A) The deterministic A2A drop-in (offline-safe, writes to Cosmos via Managed Identity)
+cd foundry-a2a-server
+python -m airacare_foundry.a2a_server --config config.aca.yaml     # or point the edge at the live ACA/Foundry endpoint
+
+# B) The deployed conversational agent (Azure AI Foundry Agent Service, gpt-5.4 + Foundry IQ)
+cd foundry-hosted-agent
+azd ai agent invoke "Give me a short recap of last night for the family."
+```
+**Say:** *"The edge already acted. Asynchronously, the cloud files the event to Cosmos and —
+on request — a **hosted agent on gpt-5.4** consults six specialists, grounds its advice in a
+**Foundry IQ** knowledge base with citations, and returns a warm family briefing. It never sets
+the risk level — the edge remains the sole safety authority."*
+
+### Beat 6 — The care dashboard (population + longitudinal story)
+```powershell
+cd foundry-a2a-server
+python -m airacare_foundry.dashboard.server --seed          # local demo data, or:
+python -m airacare_foundry.dashboard.server --backend cosmos # live filed events from Cosmos
+# open http://localhost:8973
+```
+**Say:** *"Same privacy-scrubbed events, one clinician-facing view: the cognitive trajectory
+with its trend line, event mix, the edge-vs-cloud escalation funnel, and nighttime-risk by week
+— reading the **same Cosmos** the hosted agent writes. This is the population-health / business
+story."*
+
 ---
 
 ## 3. Judge-facing talking points (map to the criteria)
@@ -115,11 +148,13 @@ automatically."* → look for `🔁 re-synced 1 queued event(s)`.
 | Token-frugal, autonomous | Keyword fast-path filters the obvious; LLM only on ambiguous; edge runs 24/7 mostly silent |
 | Faster / smarter / more trustworthy | Fast (edge decides + acts in ms), smart (LLM + async cloud fusion + policy feedback), trustworthy (privacy boundary) |
 | Reliability | Edge always acts; report store-and-forward re-syncs when the cloud returns |
+| Deep cloud reasoning (async) | Beat 5 — hosted agent on `gpt-5.4` + six specialists + **Foundry IQ** grounded, cited advice; writes to Cosmos via Managed Identity |
+| Population health / biz potential | Beat 6 — the **live care dashboard** over the same Cosmos events (trend, event mix, escalation funnel, nighttime risk) |
 | Vertical template | `DailyLivingEvent` unified model → add a `type` to cover meds, falls, meals — no new system |
 
 ---
 
-## 4. Switching to the real Foundry agent (when the teammate's agent is ready)
+## 4. Switching the edge to the real Foundry agent
 
 No edge code changes — just config:
 ```yaml

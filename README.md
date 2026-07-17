@@ -42,15 +42,19 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
   VAD + faster-whisper) → keyword/LLM understanding (Ollama Phi-3.5-mini) → **edge grades
   L0–L3 and acts locally** → reports the `DailyLivingEvent` via A2A → offline
   store-and-forward. **Runs CPU-only.**
-- **Foundry Care Orchestrator** (`foundry-a2a-server/`, this repo — see
-  [`foundry-a2a-server/README.md`](foundry-a2a-server/README.md)) — the cloud "brain", **off the real-time safety
+- **Foundry Care Orchestrator** (`foundry-a2a-server/` + `foundry-hosted-agent/`, this repo —
+  see [`foundry-a2a-server/README.md`](foundry-a2a-server/README.md)) — the cloud "brain", **off the real-time safety
   path**: a **two-tier** agent (a synchronous **considered assessment** returned on the
   report + an asynchronous **deliberate** tier for fusion / escalation / trends / policy
-  learning) built on Foundry Connected Agents, Toolboxes, and Azure AI Search knowledge. It
+  learning) built on Foundry Connected Agents and Toolboxes, with knowledge grounded in a
+  **Foundry IQ** knowledge base (agentic RAG over Azure AI Search). It
   is a **drop-in** for the local A2A stub — same `airacare.report` → `CloudAssessment` and
   `airacare.fetch_policy` → `EdgePolicyUpdate` contract; `cloud.mode: foundry` switches to
-  the real one. Demo state runs on a local store; production graduates to Cosmos DB mirrored
-  into Microsoft Fabric/OneLake for analytics + Power BI reporting.
+  the real one. Demo state runs on a local store; production graduates to **Cosmos DB**
+  (live, via Managed Identity), with a **live care dashboard** over the filed events (Fabric/
+  OneLake + Power BI remain the stated production analytics target). The conversational
+  **hosted agent** (`foundry-hosted-agent/`) is deployed to **Azure AI Foundry Agent Service**
+  on `gpt-5.4`.
 
 ## Quick start
 
@@ -68,7 +72,7 @@ python -m airacare_edge.cli --scenario no-response --panel
 ```
 
 **Foundry orchestrator** (the cloud drop-in) — its **own** venv, since it's an independent
-deployable that will grow its own deps (Agent Framework, Azure AI Search, Cosmos). In a
+deployable that will grow its own deps (Agent Framework, Foundry IQ / Azure AI Search, Cosmos). In a
 second terminal:
 
 ```powershell
