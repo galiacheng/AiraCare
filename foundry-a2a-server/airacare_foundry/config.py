@@ -89,6 +89,21 @@ class DeliberateConfig(BaseModel):
     foundry_deployment: str | None = None  # e.g. ${AIRACARE_FOUNDRY_DEPLOYMENT}
     # OpenAIChatClient talks the Azure OpenAI Responses API, which requires "preview" here.
     foundry_api_version: str = "preview"
+    # Deployed Foundry **Hosted Agent** (Responses protocol) for the advisory narrative — an
+    # ALTERNATIVE to the in-process ``foundry_*`` model binding above. When ``hosted_agent_endpoint``
+    # is set (plain or ``${ENV_VAR}``), the deliberate tier delegates the advisory briefing to a
+    # *separately deployed* Foundry Hosted Agent (e.g. ``airacare-care-orchestrator``) that grounds
+    # its answer in Foundry IQ knowledge, instead of binding the six specialists to a shared model
+    # in-process. AAD auth via ``DefaultAzureCredential`` (Managed Identity in prod, ``az login``
+    # locally — never a key). Advisory only: it restates the considered level, never sets it, and
+    # runs strictly async (T2). Takes **precedence** over ``foundry_*`` when both are configured.
+    # The endpoint is the agent's OpenAI Responses URL, e.g.
+    #   https://<account>.services.ai.azure.com/api/projects/<project>/agents/<agent>/endpoint/protocols/openai/responses?api-version=v1
+    # and is emitted by ``azd`` as AGENT_<AGENT>_RESPONSES_ENDPOINT in foundry-hosted-agent/.azure.
+    hosted_agent_endpoint: str | None = None  # e.g. ${AIRACARE_HOSTED_AGENT_ENDPOINT}
+    hosted_agent_name: str | None = None  # deployed agent name (the Responses "model" field)
+    # AAD token audience for the hosted-agent call. The Foundry data plane accepts ai.azure.com.
+    hosted_agent_token_scope: str = "https://ai.azure.com/.default"
 
     def resolve_foundry_endpoint(self) -> str | None:
         """Return the Foundry model endpoint, expanding a ``${ENV_VAR}`` reference if present."""
@@ -97,6 +112,14 @@ class DeliberateConfig(BaseModel):
     def resolve_foundry_deployment(self) -> str | None:
         """Return the Foundry model/deployment name, expanding a ``${ENV_VAR}`` reference."""
         return _expand_env(self.foundry_deployment)
+
+    def resolve_hosted_agent_endpoint(self) -> str | None:
+        """Return the deployed Hosted Agent Responses endpoint, expanding ``${ENV_VAR}`` if present."""
+        return _expand_env(self.hosted_agent_endpoint)
+
+    def resolve_hosted_agent_name(self) -> str | None:
+        """Return the deployed Hosted Agent name, expanding a ``${ENV_VAR}`` reference if present."""
+        return _expand_env(self.hosted_agent_name)
 
 
 class KnowledgeConfig(BaseModel):

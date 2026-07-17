@@ -36,6 +36,11 @@ deliberate:
   # foundry_endpoint: "${AIRACARE_FOUNDRY_ENDPOINT}"
   # foundry_deployment: "${AIRACARE_FOUNDRY_DEPLOYMENT}"
   # foundry_api_version: preview
+  # --- OR delegate the advisory narrative to a separately DEPLOYED Foundry Hosted Agent
+  #     (Responses protocol, grounded in Foundry IQ). Takes precedence over foundry_* above and
+  #     works with executor: thread or agents. AAD via the same Managed Identity (no key).
+  # hosted_agent_endpoint: "${AIRACARE_HOSTED_AGENT_ENDPOINT}"  # AGENT_<AGENT>_RESPONSES_ENDPOINT
+  # hosted_agent_name: airacare-care-orchestrator
 
 knowledge:
   backend: local

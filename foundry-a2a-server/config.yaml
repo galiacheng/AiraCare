@@ -21,6 +21,16 @@ patient:
 # Asynchronous DELIBERATE tier (multi-agent fusion) — stubbed for this scaffold
 deliberate:
   enabled: false
+  # Model-backed advisory narrative (T2, advisory-only — never sets the risk level). Two options:
+  #   (a) in-process MAF workflow bound to a shared Foundry model (needs executor: agents):
+  #       executor: agents
+  #       foundry_endpoint: "https://<account>.openai.azure.com/"
+  #       foundry_deployment: gpt-5.4
+  #   (b) delegate to a separately DEPLOYED Foundry Hosted Agent over the Responses protocol
+  #       (grounded in Foundry IQ). Takes precedence over foundry_* and runs on executor thread/agents:
+  #       executor: thread
+  #       hosted_agent_endpoint: "https://<account>.services.ai.azure.com/api/projects/<project>/agents/<agent>/endpoint/protocols/openai/responses?api-version=v1"
+  #       hosted_agent_name: airacare-care-orchestrator
 
 # Knowledge agent RAG backend (grounds cloud advice in care guidelines)
 knowledge:

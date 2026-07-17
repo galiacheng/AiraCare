@@ -69,13 +69,41 @@ def _build_executor(kind: str):
 def _build_narrator(config: FoundryConfig):
     """Build the advisory model narrator for ``executor: agents`` (or None to stay deterministic).
 
-    Returns a ``(event, state, assessment) -> str`` callable only when the agents executor is
-    selected AND a Foundry model endpoint + deployment resolve (plain or ``${ENV_VAR}``). The
-    callable renders a scrubbed :func:`case_file` and runs the live MAF workflow to compose an
-    advisory caregiver briefing. Any other configuration returns None — the deliberate tier then
-    stays fully deterministic (local/CI default), preserving parity.
+    Two model-backed narrators are supported; both are advisory-only (they render a scrubbed
+    :func:`case_file` and return a caregiver briefing, never changing the considered level):
+
+    1. **Deployed Foundry Hosted Agent** (``hosted_agent_endpoint`` set) — delegates the briefing to
+       a separately deployed agent over the OpenAI Responses protocol (grounded in Foundry IQ). This
+       takes **precedence** and works with the async executors (``agents``/``thread``).
+    2. **In-process MAF workflow** (``foundry_endpoint`` + ``foundry_deployment`` set, ``executor:
+       agents``) — binds the six Connected Agents to a shared model here in the process.
+
+    Any other configuration returns None — the deliberate tier then stays fully deterministic
+    (local/CI default), preserving parity.
     """
     dc = config.deliberate
+
+    # (1) Deployed Foundry Hosted Agent (Responses protocol) — takes precedence when configured.
+    #     It's a plain HTTPS + AAD call, so it runs on either async executor (no MAF extra needed).
+    hosted_endpoint = dc.resolve_hosted_agent_endpoint()
+    if hosted_endpoint and dc.executor in ("agents", "thread"):
+        from airacare_foundry.agents.agent_framework import case_file
+        from airacare_foundry.agents.hosted_agent import HostedAgentNarrator
+
+        agent = HostedAgentNarrator(
+            hosted_endpoint,
+            dc.resolve_hosted_agent_name(),
+            token_scope=dc.hosted_agent_token_scope,
+        )
+
+        def narrate_hosted(event: DailyLivingEvent, state, assessment: CloudAssessment | None) -> str:
+            return agent.narrate(
+                case_file(event, assessment, patient_name=config.patient.name, state=state)
+            )
+
+        return narrate_hosted
+
+    # (2) In-process MAF workflow bound to a shared Foundry model — requires the agents executor.
     if dc.executor != "agents":
         return None
     endpoint = dc.resolve_foundry_endpoint()
