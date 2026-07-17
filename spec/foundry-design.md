@@ -294,7 +294,7 @@ foundry-a2a-server/              # the deterministic A2A drop-in + Cosmos writer
       # geofence: placeholder only (descriptor wraps notify); real GeofenceTool not yet built
       escalation_timer.py
       demo_seed.py               # AS BUILT: seeds the 30-day demo history (local|cosmos)
-      powerbi_export.py          # AS BUILT: record_to_row CSV export (Power BI pitch asset)
+      powerbi_export.py          # AS BUILT: record_to_row scrubbed CSV export (feeds the live dashboard)
     store/
       base.py                    # PatientStateStore + PolicyStore protocols
       local.py                   # SQLite/in-memory (MVP)  ← used for the demo

@@ -67,10 +67,9 @@ runbook in [`docs/production.md`](docs/production.md).
 
 ### Analytics & briefings
 
-The Cognitive-Trend + Briefing agents batch-read the `EventStore`. `powerbi/` exports the same
-scrubbed events to a flat CSV (`python powerbi/generate.py`) that a **Power BI** dashboard loads
-— the hackathon stand-in for the production Cosmos DB → Fabric/OneLake mirror (see
-`powerbi/README.md`).
+The Cognitive-Trend + Briefing agents batch-read the `EventStore`. `tools/powerbi_export.py`
+flattens the same scrubbed events into stable CSV rows (`record_to_row`) — the shape the live
+dashboard renders and the stand-in for the production Cosmos DB → Fabric/OneLake mirror.
 
 ### Live dashboard
 
@@ -101,9 +100,8 @@ airacare_foundry/
   store/            # base protocols + local SQLite stores (state + policy + events) + Cosmos impls
   agents/           # DELIBERATE tier + policy-learning + escalation + knowledge + cognitive-trend + briefing
   dashboard/        # live web dashboard: data.py (payload) + server.py (stdlib http) + static/ (page)
-  tools/            # notification/escalation timers + demo seed + Power BI export
+  tools/            # notification/escalation timers + demo seed + scrubbed CSV row export
 tests/              # parity + a2a + store + orchestrator + personalization + policy + knowledge + trend/briefing
-powerbi/            # Power BI pitch asset: generate.py -> sample_events.csv + dashboard README
 infra/              # cosmos.bicep + deploy.ps1 — reproducible serverless Cosmos provisioning
 docs/               # production.md — Cosmos/Fabric/Hosted-Agent graduation guide
 ```

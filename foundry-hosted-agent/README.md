@@ -8,7 +8,7 @@ This is a **new conversational surface** for family caregivers and clinicians. I
 narrative only** and is **distinct from** (does not replace):
 
 - the frozen **edge A2A safety path** (`airacare.report` / `airacare.fetch_policy`), and
-- the existing **ACA A2A server** (`foundry-a2a-server/` + `foundry-a2a-server/infra/foundry.bicep`).
+- the existing **local A2A server** (`foundry-a2a-server/`, the cloud care orchestrator + adapter).
 
 The model never sets or changes the risk level and never triggers escalation — the deterministic
 edge/cloud Python agents remain the sole authority. See the safety framing in

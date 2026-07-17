@@ -220,7 +220,7 @@ returns the async *considered* assessment.
 > run: (a) the orchestrator persisted to **Azure Cosmos DB** (`airacare-5cciixoa3zpdk`), and
 > (b) the **Hosted Agent** briefing (`azd ai agent invoke`) is **deployed on Azure AI Foundry
 > Agent Service** (gpt-5.4 + Foundry IQ). **Not yet deployed:** a *cloud-hosted A2A* endpoint —
-> the ACA A2A host (`infra/foundry.bicep`) was deprecated in favor of the Responses-protocol
+> the ACA A2A host (`infra/foundry.bicep`) was **removed** in favor of the Responses-protocol
 > Agent Service, which does **not** speak the edge's `airacare.report` contract. Pointing the
 > edge at a real Azure A2A URL would require deploying `foundry-a2a-server` (e.g. to ACA); the
 > edge client/contract is unchanged, so it is a deploy step, not a code change.

@@ -14,7 +14,7 @@ frozen, and analytics is mirrored (never migrated). This doc is the checklist fo
 | Edge policy | `LocalPolicyStore` (SQLite) | **Azure Cosmos DB**, container `edge_policy`, partition `/patient_id` |
 | Filed events | `LocalEventStore` (SQLite) | **Azure Cosmos DB**, container `daily_event`, partition `/patient_id` |
 | Trends / longitudinal analytics | in-process batch agents over SQLite | **Microsoft Fabric** (Eventhouse/KQL + Lakehouse/Delta) via **Cosmos → OneLake mirroring** |
-| Family / clinician dashboards | `powerbi/` CSV export | **Power BI** on OneLake (live) |
+| Family / clinician dashboards | live web dashboard + `tools/powerbi_export.py` CSV rows | **Power BI** on OneLake (live) |
 | Care-guidelines RAG | `LocalKnowledgeBase` | **Azure AI Search** (vector) — `KnowledgeConfig.backend: azure` |
 | Alert triggers | escalation ladder (in-process) | escalation ladder **+ Data Activator** on OneLake |
 
@@ -120,16 +120,18 @@ OneLake**. This is zero-copy and continuous — no pipeline to build or babysit:
    **Spark/KQL batch job** over the mirrored Delta table — compute, not tokens — at population
    scale, without ever touching the operational Cosmos partitions.
 4. **Power BI** builds directly on the OneLake Delta table (DirectLake), replacing the
-   `powerbi/sample_events.csv` export with a live model. The four dashboard pages in
-   `powerbi/README.md` are unchanged — only the data source is swapped.
+   `tools/powerbi_export.py` CSV rows with a live model. The dashboard pages are unchanged —
+   only the data source is swapped.
 5. Optionally attach **Data Activator** to the OneLake stream for condition-based alert
    triggers that complement the agent's escalation ladder.
 
 ## 4. Run the T2 agents as a Foundry Hosted Agent
 
-The `CareOrchestrator` composes the two tiers in-process during the demo. In production it runs
-as a **hosted agent**: the FH2 container **is** the A2A endpoint, deployed on **Azure Container
-Apps** (ACA) and wired to Cosmos over a **Managed Identity** — no key, no edge change.
+The `CareOrchestrator` composes the two tiers in-process during the demo. In production the
+advisory tier runs as a **Foundry Hosted Agent** (deployed from [`../../foundry-hosted-agent/`](../../foundry-hosted-agent/)
+via `azd`, reached over the Responses protocol) and wired to Cosmos over a **Managed Identity** —
+no key, no edge change. A thin local A2A adapter bridges the edge's frozen `airacare.report` /
+`fetch_policy` contract to the hosted agent's Responses protocol.
 
 - **T1 considered assessment** stays synchronous on the report call (prompt, patient-state
   aware) — unchanged logic.
@@ -158,34 +160,17 @@ Apps** (ACA) and wired to Cosmos over a **Managed Identity** — no key, no edge
 - The container exposes the **same** `airacare.report` / `airacare.fetch_policy` A2A methods the
   stdlib server does (plus `GET /healthz` and optional bearer auth), so the edge does not change.
 
-### 4.1 Provision + deploy (reproducible IaC)
+### 4.1 Provision + deploy
 
-`infra/foundry.bicep` + `infra/deploy-foundry.ps1` deploy the whole hosted tier. It reuses an
-existing Foundry account + model deployment and the existing Cosmos account, and creates a
-user-assigned Managed Identity, an ACR, the container image (`az acr build`), and the ACA app:
+> **Retired:** the standalone ACA IaC for this package (`infra/foundry.bicep` +
+> `infra/deploy-foundry.ps1` + `config.aca.yaml` + `Dockerfile`) has been **removed**. The hosted
+> tier is now deployed as a **Foundry Hosted Agent** from [`../../foundry-hosted-agent/`](../../foundry-hosted-agent/)
+> via `azd` (see §8 and that package's README). The local scaffold here remains the demo path
+> (stdlib A2A server + the deployed hosted agent reached over the Responses protocol).
 
-```powershell
-# From foundry-a2a-server/infra. Requires: az login, an existing Cosmos account + a Foundry model deployment.
-./deploy-foundry.ps1 `
-  -SubscriptionId <sub> -ResourceGroup airacare-rg -Location eastus2 `
-  -CosmosAccountName <cosmos-account> `
-  -FoundryAccountName <foundry-account> -FoundryResourceGroup <foundry-rg> -FoundryDeployment gpt-5.4 `
-  -DeploySearch:$false      # Azure AI Search is decoupled — enable once the KB is wired
-# Re-runs are idempotent; add -SkipBuild to reuse an already-pushed image, and pass
-# -A2AToken <token> to keep the bearer token stable across deploys.
-```
-
-The script prints the hosted endpoint, the MI clientId, and the bearer token (never written to
-disk). What it wires up:
-
-- **Managed Identity → Cosmos (no key):** the app runs with `cosmos_auth: aad`; the bicep grants
-  the MI the **Cosmos DB Built-in Data Contributor** SQL role and injects `AZURE_CLIENT_ID` so
-  `DefaultAzureCredential` selects the user-assigned identity. The container config it runs is
-  `config.aca.yaml` (`store.backend: cosmos`, endpoint/db injected as env).
-- **Managed Identity → ACR** (`AcrPull`) so ACA can pull the image; **MI → Foundry account**
-  (`Cognitive Services OpenAI User`, cross-RG) so T2's advisory workflow can call the `gpt-5.4`
-  model via `DefaultAzureCredential` (no key) when `executor: agents` is enabled.
-- **Auth + TLS:** ACA gives HTTPS; `AIRACARE_A2A_TOKEN` enables bearer auth (401 without it).
+The deployed hosted agent wires **Managed Identity → Cosmos (no key)** and **MI → Foundry model**
+the same way, and exposes the advisory narrative over the Responses protocol; the deterministic
+`ConsideredAssessor` / `EscalationAgent` remain the sole authority for the risk level.
 
 ## 5. Flip the edge to Foundry (config-only, no edge code change)
 
@@ -230,10 +215,11 @@ reads `AIRACARE_FOUNDRY_URL` + `AIRACARE_A2A_TOKEN`:
 
 ## 7. What is built vs. deferred
 
-The **Cosmos store** (§2) and the **hosted agent on ACA → Cosmos via Managed Identity** (§4–§6)
-are both provisioned by IaC and verified live. The **default demo path stays local** (SQLite +
-in-process orchestrator + one Power BI dashboard fed by `powerbi/` sample events) so a judge sees
-zero live-infra failure surface — the seams above make graduation a config swap, not a rewrite.
+The **Cosmos store** (§2) is provisioned by IaC (`infra/cosmos.bicep`) and verified live, and the
+**hosted agent → Cosmos via Managed Identity** (§4–§6, §8) is deployed from `foundry-hosted-agent/`.
+The **default demo path stays local** (SQLite + in-process orchestrator + the live web dashboard fed
+by the same scrubbed events) so a judge sees zero live-infra failure surface — the seams above make
+graduation a config swap, not a rewrite.
 
 Deferred (seams in place, not yet wired):
 
@@ -321,7 +307,7 @@ Deployed agent endpoint (Responses):
 | Role | Off-real-time-path cloud tier for the edge | Advisory narrative surface |
 | Host | Azure Container Apps + Cosmos via MI | Foundry Agent Service (managed) |
 | Model | `executor: agents` optional (advisory) | Always model-backed (advisory) |
-| Deploy | `foundry-a2a-server/infra` Bicep + `deploy-foundry.ps1` | `foundry-hosted-agent/` + `azd` |
+| Deploy | (local scaffold — stdlib server) | `foundry-hosted-agent/` + `azd` |
 
 Both reuse the **same six connected specialists** and the **same safety discipline** (model never
 owns the level or escalation). The edge is untouched by §8.

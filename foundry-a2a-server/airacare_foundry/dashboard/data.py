@@ -5,7 +5,7 @@ Cosmos) plus the patient-state store and reuses the **same** Cognitive-Trend and
 the orchestrator uses, so every number on the dashboard matches the rest of the system. It never
 touches the real-time safety path — it only *reads* the append-only event log.
 
-The visuals it drives (see ``powerbi/README.md`` for the original pitch framing):
+The visuals it drives:
 
 1. **Cognitive trajectory** — per-event voice-biomarker index over time + the OLS trend line.
 2. **Event mix** — event-type counts bucketed by ISO week.

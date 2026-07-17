@@ -111,9 +111,9 @@ automatically."* → look for `🔁 re-synced 1 queued event(s)`.
 Show the async cloud depth the edge never waits on. Two options:
 
 ```powershell
-# A) The deterministic A2A drop-in (offline-safe, writes to Cosmos via Managed Identity)
+# A) The deterministic A2A drop-in (offline-safe; set store.backend: cosmos for Cosmos via Managed Identity)
 cd foundry-a2a-server
-python -m airacare_foundry.a2a_server --config config.aca.yaml     # or point the edge at the live ACA/Foundry endpoint
+python -m airacare_foundry.a2a_server --config config.yaml     # or point the edge at a deployed Foundry endpoint
 
 # B) The deployed conversational agent (Azure AI Foundry Agent Service, gpt-5.4 + Foundry IQ)
 cd foundry-hosted-agent
