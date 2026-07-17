@@ -134,6 +134,36 @@ def test_report_polls_task_and_parses_assessment(monkeypatch):
     assert DAILY_EVENT_MARKER in transport.requests[0]["params"]["message"]["parts"][0]["text"]
 
 
+# --- report(): a single transient poll blip must not abort a live report ------
+def test_report_recovers_from_transient_poll_blip(monkeypatch):
+    transport = _FakeTransport(
+        {
+            "message/send": _rpc_result(
+                {"kind": "task", "id": "t1", "status": {"state": "working"}, "artifacts": []}
+            ),
+            "tasks/get": [
+                # first poll fails transiently (JSON-RPC error -> _rpc returns None)...
+                {"jsonrpc": "2.0", "id": "1", "error": {"code": -32000, "message": "transient"}},
+                # ...second poll succeeds; the client must retry rather than give up.
+                _rpc_result(
+                    {
+                        "kind": "task",
+                        "id": "t1",
+                        "status": {"state": "completed"},
+                        "artifacts": [_text_artifact(_assessment_block("L3"))],
+                    }
+                ),
+            ],
+        }
+    )
+    _install(monkeypatch, transport)
+    client = FoundryA2AClient(ENDPOINT, token="fake-token", poll_interval=0.0)
+    assessment = client.report(_event())
+    assert assessment is not None and assessment.considered_level == "L3"
+    # polled twice (blip + success) instead of aborting on the first None.
+    assert [r["method"] for r in transport.requests] == ["message/send", "tasks/get", "tasks/get"]
+
+
 # --- report(): synchronous message result (no task) --------------------------
 def test_report_handles_synchronous_message(monkeypatch):
     transport = _FakeTransport(

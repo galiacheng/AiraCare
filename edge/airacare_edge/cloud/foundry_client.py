@@ -95,7 +95,7 @@ class FoundryA2AClient:
         self,
         endpoint: str,
         token: str | None = None,
-        timeout: float = 10.0,
+        timeout: float = 30.0,
         poll_interval: float = 3.0,
         poll_timeout: float = 60.0,
         credential: object | None = None,
@@ -175,11 +175,18 @@ class FoundryA2AClient:
         task_id = result.get("id")
         state = (result.get("status") or {}).get("state")
         deadline = time.monotonic() + self._poll_timeout
+        misses = 0
         while task_id and state in _NON_TERMINAL_STATES and time.monotonic() < deadline:
             time.sleep(self._poll_interval)
             polled = self._rpc("tasks/get", {"id": task_id})
             if polled is None:
-                break
+                # A single transient blip must not abort a report that is still in flight;
+                # retry a few times before giving up (the edge already acted regardless).
+                misses += 1
+                if misses >= 3:
+                    break
+                continue
+            misses = 0
             result = polled
             state = (result.get("status") or {}).get("state")
         return self._collect_task_text(result)

@@ -94,7 +94,11 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
 
     # Safety action is done. Wait for the async report only so the demo can show the
     # cloud's considered assessment (the edge never waits for this in production).
-    agent.reporter.join(timeout=6.0)
+    # The live Foundry hosted agent narrates via an LLM, so the standard-A2A round trip
+    # (message/send ~8-11s, then poll tasks/get) takes ~25-30s; 6s is enough for the
+    # in-proc/local stubs but too short to display the real cloud result. Scale to the mode.
+    report_wait = 45.0 if config.cloud.mode == "foundry" else 6.0
+    agent.reporter.join(timeout=report_wait)
     outcome = agent.reporter.last_outcome
 
     if panel:
