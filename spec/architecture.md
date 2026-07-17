@@ -204,24 +204,38 @@ briefing + clinician monthly trend report.
 
 ---
 
-## 8. Verified end-to-end flow — Edge → live Foundry cloud (as built, 2026-07)
+## 8. Verified end-to-end flow — Edge → cloud orchestrator → Azure (as built, 2026-07)
 
-The hybrid loop above is **built and verified against live Azure**, not just designed. The
-edge switches from its in-process stub to the real cloud with **config only**
-(`cloud.mode: foundry`, or `--cloud foundry --endpoint …/a2a`) — **zero edge code changes**.
-The edge's *report path* speaks the frozen **A2A** contract (`airacare.report` /
-`airacare.fetch_policy`) to the **A2A Care Orchestrator** (`foundry-a2a-server/`), which files
-the `DailyLivingEvent` to **Azure Cosmos DB** and returns the async *considered* assessment.
+The hybrid loop above is **built and verified**, not just designed. The edge switches from its
+in-process stub to the A2A cloud orchestrator with **config only** (`cloud.mode: foundry`, or
+`--cloud foundry --endpoint …/a2a`) — **zero edge code changes**. The edge's *report path*
+speaks the frozen **A2A** contract (`airacare.report` / `airacare.fetch_policy`) to the
+**A2A Care Orchestrator** (`foundry-a2a-server/`), which files the `DailyLivingEvent` and
+returns the async *considered* assessment.
+
+> **What is actually live vs local — read this before demoing.** In the 2026-07-17 run the
+> A2A Care Orchestrator ran **locally** (`http://127.0.0.1:8971/a2a`) — that endpoint is a
+> **local process, NOT an Azure/Foundry URL**. The `foundry` mode name only selects the A2A
+> HTTP client; it does not imply a cloud endpoint. What *is* genuinely **live Azure** in the
+> run: (a) the orchestrator persisted to **Azure Cosmos DB** (`airacare-5cciixoa3zpdk`), and
+> (b) the **Hosted Agent** briefing (`azd ai agent invoke`) is **deployed on Azure AI Foundry
+> Agent Service** (gpt-5.4 + Foundry IQ). **Not yet deployed:** a *cloud-hosted A2A* endpoint —
+> the ACA A2A host (`infra/foundry.bicep`) was deprecated in favor of the Responses-protocol
+> Agent Service, which does **not** speak the edge's `airacare.report` contract. Pointing the
+> edge at a real Azure A2A URL would require deploying `foundry-a2a-server` (e.g. to ACA); the
+> edge client/contract is unchanged, so it is a deploy step, not a code change.
+
 The Responses-protocol **Hosted Agent** (`foundry-hosted-agent/`, gpt-5.4 + Foundry IQ) is a
-separate *conversational* surface over the **same** Cosmos data.
+separate *conversational* surface over the **same** Cosmos data — it is **not** on the edge's
+A2A report path.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant E as 🏠 Edge Agent<br/>(cloud.mode: foundry)
-    participant O as ☁ A2A Care Orchestrator<br/>(foundry-a2a-server, :8971/a2a)
-    participant C as 🗄 Azure Cosmos DB<br/>(daily_event · PK /patient_id)
-    participant H as 💬 Hosted Agent<br/>(Foundry Agent Service · gpt-5.4 + Foundry IQ)
+    participant O as A2A Care Orchestrator<br/>(foundry-a2a-server — LOCAL :8971/a2a)
+    participant C as 🗄 Azure Cosmos DB<br/>(LIVE · daily_event · PK /patient_id)
+    participant H as 💬 Hosted Agent<br/>(LIVE · Foundry Agent Service · gpt-5.4 + Foundry IQ)
     participant F as 👪 Family / 🩺 Clinician
 
     Note over E: 3AM wander · no response → edge decides L3 → ACTS NOW<br/>(alarm + SMS + community) — never waits on cloud
@@ -236,18 +250,20 @@ sequenceDiagram
     H-->>F: warm, cited briefing (advisory only — never sets the level)
 ```
 
-**Verified evidence (2026-07-17, live subscription):**
+**Verified evidence (2026-07-17):**
 
-| Check | Result |
-|---|---|
-| Edge switch to cloud | `--cloud foundry --endpoint http://127.0.0.1:8971/a2a` — panel cloud pane read **`foundry`** (not `stub`); **no code change** |
-| A2A request received | server log: `[a2a] POST /a2a method=airacare.report id=1 -> 200` |
-| Async considered assessment | returned **L3**, `policy_version: 1`, + caregiver notification |
-| Written to Cosmos | `daily_event` count **40 → 41**; the exact L3 wander event (`285c6512…`, `ts 2026-07-13T03:00:00Z`) filed |
-| Hosted agent (same Cosmos) | `azd ai agent invoke` → gpt-5.4 briefing grounded in **Foundry IQ** with cited sources (`nighttime-wandering.md`, `exit-seeking-elopement.md`, …), reading the same events |
-| Safety authority | the cloud/hosted agent **never** set or changed the risk level — the edge remained the sole safety authority |
+| Check | Result | Where it ran |
+|---|---|---|
+| Edge switch to A2A orchestrator | `--cloud foundry --endpoint http://127.0.0.1:8971/a2a` — panel cloud pane read **`foundry`** (the config mode, not the stub); **no code change** | local |
+| A2A request received | server log: `[a2a] POST /a2a method=airacare.report id=1 -> 200` | local process |
+| Async considered assessment | returned **L3**, `policy_version: 1`, + caregiver notification | local process |
+| Written to Cosmos | `daily_event` count **40 → 41**; the exact L3 wander event (`285c6512…`, `ts 2026-07-13T03:00:00Z`) filed | **live Azure Cosmos** |
+| Hosted agent (same Cosmos) | `azd ai agent invoke` → gpt-5.4 briefing grounded in **Foundry IQ** with cited sources (`nighttime-wandering.md`, `exit-seeking-elopement.md`, …), reading the same events | **live Azure Foundry Agent Service** |
+| Safety authority | the cloud/hosted agent **never** set or changed the risk level — the edge remained the sole safety authority | — |
 
-This closes the loop the design promised: the edge **decides and acts locally**, only the
-structured `DailyLivingEvent` crosses the privacy boundary, and the cloud reasons
-**asynchronously** — records to Cosmos, a considered assessment + policy hint back to the edge,
-and warm cited briefings out to family/clinicians.
+This exercises the loop the design promised: the edge **decides and acts locally**, only the
+structured `DailyLivingEvent` crosses the privacy boundary, and the cloud path reasons
+**asynchronously** — records to **live Cosmos**, a considered assessment + policy hint back to
+the edge, and a **live** hosted-agent cited briefing out to family/clinicians. The one honest
+caveat is that the A2A orchestrator process was local in this run; graduating it to a cloud A2A
+endpoint is a deployment step, not an edge change.
