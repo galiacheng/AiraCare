@@ -7,7 +7,7 @@ server:
 store:
   backend: local             # local (SQLite / in-memory) | cosmos (production; needs [cosmos])
   sqlite_path: ":memory:"    # ":memory:" for ephemeral, or a file path to persist (local)
-  # Cosmos backend (production graduation — see foundry/docs/production.md):
+  # Cosmos backend (production graduation — see foundry-a2a-server/docs/production.md):
   # cosmos_endpoint: "https://<account>.documents.azure.com:443/"
   # cosmos_credential: "<key-or-injected-from-env>"
   # cosmos_database: airacare

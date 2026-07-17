@@ -10,7 +10,7 @@ cognitive-trend, briefing, policy-learning — each wrapped as a tool, grounds c
 Cosmos DB and save an advisory briefing back.
 
 Safety discipline (mirrors the FH6 design in
-``foundry/airacare_foundry/agents/agent_framework.py``): the model is **advisory only**. It never
+``foundry-a2a-server/airacare_foundry/agents/agent_framework.py``): the model is **advisory only**. It never
 sets or second-guesses the risk level and never triggers alerts — the deterministic edge/cloud
 Python agents remain the sole authority for the considered level and for escalation. Any
 ``considered_level`` read from the event store is authoritative and is restated verbatim. No

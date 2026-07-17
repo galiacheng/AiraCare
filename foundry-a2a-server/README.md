@@ -93,7 +93,7 @@ docs/               # production.md — Cosmos/Fabric/Hosted-Agent graduation gu
 ## Install & run
 
 ```powershell
-cd foundry
+cd foundry-a2a-server
 python -m pip install -e ".[dev]"
 
 # Start the orchestrator (edge points at this endpoint)

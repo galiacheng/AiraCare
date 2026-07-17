@@ -248,10 +248,10 @@ Because raw modality data stays on the edge, Foundry's multi-modal understanding
   features** into a cognitive trajectory (this hits the multi-modal / streaming-plus-batch
   bonus). Heavy modeling is **compute, not tokens** — keeps the agent frugal.
 
-## 10. Proposed repo / module layout (`foundry/`)
+## 10. Proposed repo / module layout (`foundry-a2a-server/`)
 
 ```
-foundry/
+foundry-a2a-server/
   pyproject.toml
   config.yaml                    # models, AI Search endpoint, store mode (local|cosmos), contacts
   airacare_foundry/

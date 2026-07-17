@@ -5,7 +5,7 @@ Grounding documents for the care-orchestrator's `knowledge` specialist, served t
 
 These are short, general, non-clinical caregiver-guidance notes on common in-home dementia
 scenarios. They contain **no patient data** — nothing here is PII. They expand the four seeded
-snippets originally in `foundry/airacare_foundry/agents/knowledge.py`
+snippets originally in `foundry-a2a-server/airacare_foundry/agents/knowledge.py`
 (`DEFAULT_GUIDELINES`).
 
 ## How it is used

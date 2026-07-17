@@ -34,7 +34,7 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
 | [`spec/foundry-design.md`](spec/foundry-design.md) | Foundry Care Orchestrator design (async considered assessment, connected agents, escalation, policy feedback, data layer) |
 | [`spec/demo-runbook.md`](spec/demo-runbook.md) | **Step-by-step demo script** |
 | [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
-| [`foundry/`](foundry/) | Foundry Care Orchestrator implementation (Python) — see [`foundry/README.md`](foundry/README.md) |
+| [`foundry-a2a-server/`](foundry-a2a-server/) | Foundry Care Orchestrator implementation (Python) — see [`foundry-a2a-server/README.md`](foundry-a2a-server/README.md) |
 
 ## Components
 
@@ -42,8 +42,8 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
   VAD + faster-whisper) → keyword/LLM understanding (Ollama Phi-3.5-mini) → **edge grades
   L0–L3 and acts locally** → reports the `DailyLivingEvent` via A2A → offline
   store-and-forward. **Runs CPU-only.**
-- **Foundry Care Orchestrator** (`foundry/`, this repo — see
-  [`foundry/README.md`](foundry/README.md)) — the cloud "brain", **off the real-time safety
+- **Foundry Care Orchestrator** (`foundry-a2a-server/`, this repo — see
+  [`foundry-a2a-server/README.md`](foundry-a2a-server/README.md)) — the cloud "brain", **off the real-time safety
   path**: a **two-tier** agent (a synchronous **considered assessment** returned on the
   report + an asynchronous **deliberate** tier for fusion / escalation / trends / policy
   learning) built on Foundry Connected Agents, Toolboxes, and Azure AI Search knowledge. It
@@ -72,7 +72,7 @@ deployable that will grow its own deps (Agent Framework, Azure AI Search, Cosmos
 second terminal:
 
 ```powershell
-cd foundry
+cd foundry-a2a-server
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"

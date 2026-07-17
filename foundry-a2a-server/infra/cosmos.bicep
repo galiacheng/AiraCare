@@ -10,7 +10,7 @@
 // SERVERLESS by default: no idle cost, pay-per-request - ideal for demo/hackathon. Flip
 // `serverless: false` (and set `throughput`) for a provisioned production account.
 //
-// Deploy: see foundry/infra/deploy.ps1 (resource-group scoped).
+// Deploy: see foundry-a2a-server/infra/deploy.ps1 (resource-group scoped).
 
 @description('Cosmos DB account name (3-44 chars, lowercase letters/numbers/hyphens; globally unique).')
 param accountName string = 'airacare-${uniqueString(resourceGroup().id)}'

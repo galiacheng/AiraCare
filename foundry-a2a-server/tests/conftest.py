@@ -12,7 +12,7 @@ import pathlib
 import sys
 
 _HERE = pathlib.Path(__file__).resolve()
-_FOUNDRY_ROOT = _HERE.parents[1]  # foundry/
+_FOUNDRY_ROOT = _HERE.parents[1]  # foundry-a2a-server/
 _REPO_ROOT = _FOUNDRY_ROOT.parent  # repo root
 _EDGE_ROOT = _REPO_ROOT / "edge"  # sibling edge package
 

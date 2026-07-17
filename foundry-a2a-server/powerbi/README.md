@@ -10,7 +10,7 @@ container** (zero-copy, no ETL); the visuals below are unchanged.
 
 ## Generate the dataset
 
-From the `foundry/` directory:
+From the `foundry-a2a-server/` directory:
 
 ```powershell
 python powerbi/generate.py   # writes powerbi/sample_events.csv

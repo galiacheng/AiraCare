@@ -54,7 +54,7 @@ $ErrorActionPreference = 'Stop'
 # Force UTF-8 so `az acr build` log streaming doesn't crash on cp1252 consoles (colorama bug).
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 $env:PYTHONIOENCODING = 'utf-8'
-$foundryDir = Split-Path $PSScriptRoot -Parent      # the foundry/ build context
+$foundryDir = Split-Path $PSScriptRoot -Parent      # the foundry-a2a-server/ build context
 $bicep = Join-Path $PSScriptRoot 'foundry.bicep'
 if (-not $SearchLocation) { $SearchLocation = $Location }
 

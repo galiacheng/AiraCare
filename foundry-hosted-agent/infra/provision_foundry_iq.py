@@ -21,7 +21,7 @@ Auth:
     embedding config so ingestion uses key auth. The key is read from the environment only — it is
     never written to source. Query-time (agent → Search) auth stays keyless via RBAC.
 
-Environment variables (see the deploy notes in ``foundry/docs/production.md`` §8.5):
+Environment variables (see the deploy notes in ``foundry-a2a-server/docs/production.md`` §8.5):
   AIRACARE_SEARCH_ENDPOINT       e.g. https://srch-airacare-kb.search.windows.net
   AIRACARE_SEARCH_KB             knowledge base name      (default: airacare-care-kb)
   AIRACARE_SEARCH_KS             knowledge source name    (default: airacare-guidelines-ks)

@@ -3,7 +3,7 @@
 Decision #6 = C: for the hackathon we don't stand up the full Cosmos DB → Fabric/OneLake →
 Power BI pipeline. Instead we export the same privacy-scrubbed :class:`RecordedEvent`s to a flat
 CSV that a **Power BI** report loads directly, standing in for the OneLake mirror. The columns
-are chosen to drive the pitch dashboard visuals (see ``foundry/powerbi/README.md``): the
+are chosen to drive the pitch dashboard visuals (see ``foundry-a2a-server/powerbi/README.md``): the
 cognitive trajectory line, the event-type mix, the escalation funnel, and the daily volume.
 
 Privacy invariant holds: only derived event data is exported — never raw audio/video/features

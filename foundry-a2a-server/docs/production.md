@@ -38,7 +38,7 @@ index on `daily_event (patient_id ASC, ts ASC)` for the range+order event query.
 the exact config to paste (the key is **never written to disk**):
 
 ```powershell
-cd foundry/infra
+cd foundry-a2a-server/infra
 ./deploy.ps1 -ResourceGroup airacare-rg -Location eastus2
 # prod / provisioned throughput instead of serverless:
 # ./deploy.ps1 -ResourceGroup airacare-rg -Location eastus2 -Serverless:$false -Throughput 800
@@ -165,7 +165,7 @@ existing Foundry account + model deployment and the existing Cosmos account, and
 user-assigned Managed Identity, an ACR, the container image (`az acr build`), and the ACA app:
 
 ```powershell
-# From foundry/infra. Requires: az login, an existing Cosmos account + a Foundry model deployment.
+# From foundry-a2a-server/infra. Requires: az login, an existing Cosmos account + a Foundry model deployment.
 ./deploy-foundry.ps1 `
   -SubscriptionId <sub> -ResourceGroup airacare-rg -Location eastus2 `
   -CosmosAccountName <cosmos-account> `
@@ -321,7 +321,7 @@ Deployed agent endpoint (Responses):
 | Role | Off-real-time-path cloud tier for the edge | Advisory narrative surface |
 | Host | Azure Container Apps + Cosmos via MI | Foundry Agent Service (managed) |
 | Model | `executor: agents` optional (advisory) | Always model-backed (advisory) |
-| Deploy | `foundry/infra` Bicep + `deploy-foundry.ps1` | `foundry-hosted-agent/` + `azd` |
+| Deploy | `foundry-a2a-server/infra` Bicep + `deploy-foundry.ps1` | `foundry-hosted-agent/` + `azd` |
 
 Both reuse the **same six connected specialists** and the **same safety discipline** (model never
 owns the level or escalation). The edge is untouched by §8.
