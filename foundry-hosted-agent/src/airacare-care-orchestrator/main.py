@@ -4,8 +4,10 @@
 This is the cloud **care-orchestrator** graduated onto the Microsoft Agent Framework and hosted by
 Azure AI Foundry Agent Service. A caregiver or clinician converses with it (Responses API); the
 orchestrator consults six connected specialists — risk-reasoning, knowledge, escalation,
-cognitive-trend, briefing, policy-learning — each wrapped as a tool, and can look up the patient's
-real filed events / state from Cosmos DB and save an advisory briefing back.
+cognitive-trend, briefing, policy-learning — each wrapped as a tool, grounds care guidance in a
+**Foundry IQ** knowledge base (agentic retrieval over Azure AI Search) via the
+``search_care_guidelines`` tool, and can look up the patient's real filed events / state from
+Cosmos DB and save an advisory briefing back.
 
 Safety discipline (mirrors the FH6 design in
 ``foundry/airacare_foundry/agents/agent_framework.py``): the model is **advisory only**. It never
@@ -34,6 +36,7 @@ Runtime contract (from the Foundry Agent-Framework Responses sample):
   infrastructure manages conversation history, so ``default_options={"store": False}``.
 """
 
+import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -70,9 +73,12 @@ _SPECIALISTS: list[dict[str, str]] = [
         "name": "knowledge",
         "role": "Ground caregiver advice in established dementia care guidelines.",
         "instructions": (
-            "Offer brief, practical, evidence-aligned dementia-care guidance relevant to the "
-            "situation described, with a short rationale. If nothing is clearly relevant, say so "
-            "briefly rather than speculating."
+            "You MUST call the search_care_guidelines tool with a short description of the "
+            "situation before answering, and base your guidance on the passages it returns, citing "
+            "the source guideline names it provides. Offer brief, practical, evidence-aligned "
+            "dementia-care guidance relevant to the situation, with a short rationale. If the tool "
+            "returns nothing clearly relevant (or is unavailable), say so briefly and give only "
+            "general, clearly-labelled advice rather than speculating."
         ),
     },
     {
@@ -133,7 +139,10 @@ _ORCHESTRATOR_INSTRUCTIONS = (
     "Data tools: when the caregiver refers to a specific patient (by id, e.g. 'p-001'), you may "
     "call fetch_recent_events and fetch_patient_state to ground your answer in their real filed "
     "history, and log_care_briefing to save a short advisory recap for the record. Saving a "
-    "briefing is just a note — it never changes the patient's care, risk level, or escalation.\n\n"
+    "briefing is just a note — it never changes the patient's care, risk level, or escalation. "
+    "Before giving any care guidance, call search_care_guidelines (or delegate to the knowledge "
+    "specialist, which uses it) so the advice is grounded in the dementia-care guideline knowledge "
+    "base and cite the source guideline names it returns.\n\n"
     "Consult the specialist tools (risk_reasoning, knowledge, escalation, cognitive_trend, "
     "briefing, policy_learning) as helpful for the caregiver's question, passing along the relevant "
     "situation. Then reply with a short, warm, plain-language message: acknowledge what happened, "
@@ -167,6 +176,18 @@ _COSMOS_KEY_SECRET = os.getenv("AIRACARE_COSMOS_KEY_SECRET", "airacare-cosmos-pr
 _DAILY_EVENT_CONTAINER = "daily_event"
 _PATIENT_STATE_CONTAINER = "patient_state"
 _CARE_BRIEFING_CONTAINER = "care_briefing"
+
+# --------------------------------------------------------------------------------------------
+# Foundry IQ knowledge base (agentic retrieval over Azure AI Search) for grounded, cited care
+# guidance. Query-time auth is keyless: the running identity calls the Search "retrieve" endpoint
+# with its AAD token (needs *Search Index Data Reader* on the service). If the search endpoint is
+# unset the knowledge tool degrades gracefully and the specialist answers from its own knowledge.
+# --------------------------------------------------------------------------------------------
+_SEARCH_ENDPOINT = os.getenv("AIRACARE_SEARCH_ENDPOINT", "").rstrip("/")
+_SEARCH_KB = os.getenv("AIRACARE_SEARCH_KB", "airacare-care-kb")
+_SEARCH_KS = os.getenv("AIRACARE_SEARCH_KS", "airacare-guidelines-ks")
+_SEARCH_API = "2026-04-01"
+_SEARCH_SCOPE = "https://search.azure.com/.default"
 
 # Shared AAD credential (also used by FoundryChatClient) and a cached Cosmos database client.
 _CREDENTIAL: DefaultAzureCredential | None = None
@@ -317,10 +338,93 @@ def log_care_briefing(
     return f"Saved an advisory {audience} briefing for patient {patient_id} at {ts}."
 
 
+def _blob_title(blob_url: str) -> str:
+    """Turn a source blob URL into a readable citation, e.g. 'exit-seeking-elopement.md'."""
+    name = blob_url.rstrip("/").rsplit("/", 1)[-1] if blob_url else ""
+    return name or blob_url or "guideline"
+
+
+@tool(
+    name="search_care_guidelines",
+    description=(
+        "Retrieve grounded, cited guidance from AiraCare's dementia-care guideline knowledge base "
+        "(Foundry IQ agentic retrieval over Azure AI Search). Use this BEFORE giving any care advice "
+        "so the guidance is evidence-aligned rather than invented. Returns relevant guideline "
+        "passages with their source citations."
+    ),
+)
+def search_care_guidelines(
+    query: Annotated[
+        str,
+        "A natural-language description of the caregiving situation or question, "
+        "e.g. 'patient wandering toward the door at night'.",
+    ],
+    top: Annotated[int, "Maximum number of guideline passages to return (default 3)."] = 3,
+) -> str:
+    if not _SEARCH_ENDPOINT:
+        return (
+            "The care-guideline knowledge base is not configured here, so I can't retrieve cited "
+            "guidance. Answer from established dementia-care practice and say it is general advice."
+        )
+    try:
+        import requests  # lazy: only needed when the knowledge tool is used
+
+        token = _credential().get_token(_SEARCH_SCOPE).token
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        body = {
+            "intents": [{"type": "semantic", "search": query}],
+            "knowledgeSourceParams": [{"knowledgeSourceName": _SEARCH_KS, "kind": "azureBlob"}],
+        }
+        url = f"{_SEARCH_ENDPOINT}/knowledgebases/{_SEARCH_KB}/retrieve?api-version={_SEARCH_API}"
+        resp = requests.post(url, headers=headers, json=body, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001 — advisory tool must never crash the turn
+        return (
+            f"Could not reach the care-guideline knowledge base ({type(exc).__name__}); answer "
+            "from general dementia-care practice and note it is general advice."
+        )
+
+    # Map ref_id -> source citation from the references block.
+    citations = {
+        str(ref.get("id")): _blob_title(ref.get("blobUrl", ""))
+        for ref in (data.get("references") or [])
+    }
+
+    # The response carries content blocks whose text is a JSON array of {ref_id, content}.
+    passages: list[str] = []
+    for block in data.get("response") or []:
+        for part in block.get("content") or []:
+            text = part.get("text") or ""
+            try:
+                items = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                if text.strip():
+                    passages.append(text.strip())
+                continue
+            for item in items if isinstance(items, list) else []:
+                content = (item.get("content") or "").strip()
+                if not content:
+                    continue
+                cite = citations.get(str(item.get("ref_id")), "guideline")
+                snippet = content[:900]
+                passages.append(f"[{cite}] {snippet}")
+
+    passages = passages[: max(1, top)]
+    if not passages:
+        return f"No care guideline clearly matched '{query}'. Say so briefly rather than speculating."
+    cited = {p.split("] ", 1)[0].lstrip("[") for p in passages if p.startswith("[")}
+    sources = ", ".join(sorted(cited))
+    header = f"Grounded guidance for '{query}' (sources: {sources}):\n\n" if sources else ""
+    return header + "\n\n---\n\n".join(passages)
+
+
 def _build_orchestrator(client: FoundryChatClient) -> Agent:
     """Build the care-orchestrator agent with the six specialists and the data tools."""
     tools: list[Any] = []
     for spec in _SPECIALISTS:
+        # The knowledge specialist gets the retrieval tool so its advice is grounded + cited.
+        specialist_tools = [search_care_guidelines] if spec["name"] == "knowledge" else None
         specialist = Agent(
             client=client,
             name=spec["name"],
@@ -330,6 +434,7 @@ def _build_orchestrator(client: FoundryChatClient) -> Agent:
                 "risk level or edge action mentioned as authoritative and unchangeable. If the "
                 "situation is irrelevant to your role, say so briefly."
             ),
+            tools=specialist_tools,
             default_options={"store": False},
         )
         tools.append(
@@ -340,8 +445,12 @@ def _build_orchestrator(client: FoundryChatClient) -> Agent:
             )
         )
 
-    # Cosmos-backed data tools (read the real care record; write only to care_briefing).
-    tools.extend([fetch_recent_events, fetch_patient_state, log_care_briefing])
+    # Cosmos-backed data tools (read the real care record; write only to care_briefing) plus the
+    # Foundry IQ retrieval tool (also exposed at the top level so the orchestrator can cite
+    # guidelines directly when it answers without delegating to the knowledge specialist).
+    tools.extend(
+        [fetch_recent_events, fetch_patient_state, log_care_briefing, search_care_guidelines]
+    )
 
     return Agent(
         client=client,

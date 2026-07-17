@@ -375,3 +375,80 @@ briefing to `care_briefing`. *Deployed* (tier 2, Key-Vault-backed key via MI): t
 produced the same grounded recap — proving the deployed agent fetches its key from Key Vault with its
 Managed Identity and then reads `daily_event` / writes `care_briefing`, with no secret in its env.
 
+### 8.5 Grounding care advice in a Foundry IQ knowledge base (RAG)
+
+§8.4 grounds the agent in the patient's *own history*. §8.5 grounds its **care advice** in an
+external corpus of dementia-care guidelines using **Foundry IQ** — a managed **knowledge base** that
+performs **agentic retrieval** over **Azure AI Search** (RAG, not a raw index). Instead of the model
+inventing guidance, the `knowledge` specialist retrieves real guideline passages and cites them.
+
+**Corpus.** [`foundry-hosted-agent/knowledge/corpus/`](../../foundry-hosted-agent/knowledge/corpus)
+holds 8 short, non-PII markdown guidelines (nighttime wandering, exit-seeking/elopement, falls,
+medication management, sundowning, communication approach, home safety, escalation signals). They are
+uploaded to a Blob container and indexed by Foundry IQ.
+
+**Provision (reproducible).** [`foundry-hosted-agent/infra/provision_foundry_iq.py`](../../foundry-hosted-agent/infra/provision_foundry_iq.py)
+(REST, Search API `2026-04-01` GA) creates a **blob knowledge source** — which auto-generates the
+datasource, skillset (chunk + `text-embedding-3-small` vectorize), index, and indexer and runs
+ingestion — then the **knowledge base** over it, polls the indexer, and runs a `retrieve` smoke test.
+One-time Azure setup:
+
+```powershell
+# AI Search (Basic) + storage + an embedding deployment, all in rg-airacare-agent:
+az search service create -n srch-airacare-kb -g rg-airacare-agent --sku basic --identity-type SystemAssigned
+az storage account create -n <stg> -g rg-airacare-agent; az storage container create --account-name <stg> -n knowledge
+az cognitiveservices account deployment create -n cog-... -g rg-airacare-agent \
+  --deployment-name text-embedding-3-small --model-name text-embedding-3-small \
+  --model-version 1 --model-format OpenAI --sku Standard --capacity 50
+# RBAC: Search system MI -> Storage Blob Data Reader (storage); my user -> Search Service Contributor
+#       + Search Index Data Contributor on the search service. Upload the 8 corpus docs to the
+#       `knowledge` container, then:
+$env:AIRACARE_SEARCH_ENDPOINT="https://srch-airacare-kb.search.windows.net"
+$env:AIRACARE_STORAGE_RESOURCE_ID="<storage ARM id>"
+$env:AIRACARE_EMBED_ENDPOINT="https://cog-....openai.azure.com"
+python infra/provision_foundry_iq.py
+```
+
+**Embedding-auth gotcha (documented in the script).** The AI Search indexer embeds documents by
+calling the embedding model **as the Search service's managed identity**. On an **AIServices**
+(multi-service) account the MI→OpenAI data-plane token can be rejected as **`DeploymentNotFound`**
+(a 404, not a 403) even with *Cognitive Services User* **and** *OpenAI User* granted and fully
+propagated. The reliable fix for the one-time ingestion is **key auth on the embedding call only**:
+temporarily re-enable local auth on the account (`az resource update --ids <acct> --set
+properties.disableLocalAuth=false`) and set `AIRACARE_EMBED_KEY` — the script then pins that key on
+the knowledge-source embedding config (read from the environment, never written to source).
+**Query-time** auth stays fully keyless via RBAC (below).
+
+**Retrieve tool (query time, keyless).** `main.py` adds a `search_care_guidelines(query, top)`
+`@tool` that POSTs to the KB `…/knowledgebases/<kb>/retrieve` endpoint with the running identity's
+AAD token (scope `https://search.azure.com/.default`). Request body:
+`{"intents":[{"type":"semantic","search":<query>}], "knowledgeSourceParams":[{"knowledgeSourceName":<ks>,"kind":"azureBlob"}]}`
+— note the intent **must** carry `"type":"semantic"` and the params `kind` must match the source
+(`azureBlob`). The tool parses `response[*].content[*].text` (a JSON array of `{ref_id, content}`)
+and maps each `ref_id` to its source filename via `references[*].blobUrl`, returning cited passages.
+The `knowledge` specialist is instructed to **call this tool before advising** and to cite the
+guideline names; it degrades gracefully (general, clearly-labelled advice) when
+`AIRACARE_SEARCH_ENDPOINT` is unset or the KB is unreachable. Config: add `AIRACARE_SEARCH_ENDPOINT`,
+`AIRACARE_SEARCH_KB`, `AIRACARE_SEARCH_KS` to the agent's `environmentVariables` in `azure.yaml` and
+`azd env set`; add `requests` + `azure-identity` to `requirements.txt`.
+
+**Auth (query time).** Unlike Cosmos, **Azure AI Search accepts the agent's `ServiceIdentity`** via
+standard Azure RBAC — no Key Vault indirection needed. Grant the agent's runtime identity **Search
+Index Data Reader** on the search service:
+
+```powershell
+az role assignment create --assignee-object-id <agent principalId> --assignee-principal-type ServicePrincipal \
+  --role "Search Index Data Reader" --scope <search service ARM id>
+```
+
+**Safety invariant (unchanged).** Knowledge only **grounds advice** — it never sets a risk level or
+triggers escalation. Retrieved passages are non-PII guidelines; the tool sends only the caregiver's
+paraphrased situation (no raw modality data, no patient identifiers required).
+
+**Verified live** (agent version 5). Prompt: *"my father with moderate Alzheimer's keeps trying to
+open the front door at night; the edge already assessed considered L2 and reassured him — what do the
+guidelines say?"* → the agent **restated L2 verbatim**, called `search_care_guidelines`, and returned
+grounded steps **citing `exit-seeking-elopement.md, communication-approach.md, home-safety-prevention.md`**
+plus a single gentle next step and an emergency-services fallback — no level change, no invented
+guidance.
+

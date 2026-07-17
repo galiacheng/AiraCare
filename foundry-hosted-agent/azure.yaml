@@ -41,6 +41,12 @@ services:
               value: ${AIRACARE_COSMOS_KEY_VAULT_URI}
             - name: AIRACARE_COSMOS_KEY_SECRET
               value: ${AIRACARE_COSMOS_KEY_SECRET}
+            - name: AIRACARE_SEARCH_ENDPOINT
+              value: ${AIRACARE_SEARCH_ENDPOINT}
+            - name: AIRACARE_SEARCH_KB
+              value: ${AIRACARE_SEARCH_KB}
+            - name: AIRACARE_SEARCH_KS
+              value: ${AIRACARE_SEARCH_KS}
         kind: hosted
         metadata:
             tags:
