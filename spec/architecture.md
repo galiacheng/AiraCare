@@ -201,3 +201,53 @@ may match, enrich, or refine the record) plus caregiver briefings and edge polic
 **Notification principles:** anti-alert-fatigue (grading + aggregation + quiet hours);
 explainable (every alert carries *why* + *what to do*); deliverables = family daily
 briefing + clinician monthly trend report.
+
+---
+
+## 8. Verified end-to-end flow — Edge → live Foundry cloud (as built, 2026-07)
+
+The hybrid loop above is **built and verified against live Azure**, not just designed. The
+edge switches from its in-process stub to the real cloud with **config only**
+(`cloud.mode: foundry`, or `--cloud foundry --endpoint …/a2a`) — **zero edge code changes**.
+The edge's *report path* speaks the frozen **A2A** contract (`airacare.report` /
+`airacare.fetch_policy`) to the **A2A Care Orchestrator** (`foundry-a2a-server/`), which files
+the `DailyLivingEvent` to **Azure Cosmos DB** and returns the async *considered* assessment.
+The Responses-protocol **Hosted Agent** (`foundry-hosted-agent/`, gpt-5.4 + Foundry IQ) is a
+separate *conversational* surface over the **same** Cosmos data.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant E as 🏠 Edge Agent<br/>(cloud.mode: foundry)
+    participant O as ☁ A2A Care Orchestrator<br/>(foundry-a2a-server, :8971/a2a)
+    participant C as 🗄 Azure Cosmos DB<br/>(daily_event · PK /patient_id)
+    participant H as 💬 Hosted Agent<br/>(Foundry Agent Service · gpt-5.4 + Foundry IQ)
+    participant F as 👪 Family / 🩺 Clinician
+
+    Note over E: 3AM wander · no response → edge decides L3 → ACTS NOW<br/>(alarm + SMS + community) — never waits on cloud
+    E->>O: POST /a2a airacare.report { DailyLivingEvent, edge_assessed_level: L3 }
+    O->>C: file DailyLivingEvent (considered L3)
+    O-->>E: CloudAssessment { considered_level: L3, policy_version: 1 }
+    Note over E: edge already acted — this only enriches the record
+    E->>O: airacare.fetch_policy { patient_id, since_version } (lazy, only if changed)
+    O-->>E: EdgePolicyUpdate | null (tunes FUTURE events)
+    F->>H: "Give me a short recap of last night"
+    H->>C: fetch_recent_events / fetch_patient_state
+    H-->>F: warm, cited briefing (advisory only — never sets the level)
+```
+
+**Verified evidence (2026-07-17, live subscription):**
+
+| Check | Result |
+|---|---|
+| Edge switch to cloud | `--cloud foundry --endpoint http://127.0.0.1:8971/a2a` — panel cloud pane read **`foundry`** (not `stub`); **no code change** |
+| A2A request received | server log: `[a2a] POST /a2a method=airacare.report id=1 -> 200` |
+| Async considered assessment | returned **L3**, `policy_version: 1`, + caregiver notification |
+| Written to Cosmos | `daily_event` count **40 → 41**; the exact L3 wander event (`285c6512…`, `ts 2026-07-13T03:00:00Z`) filed |
+| Hosted agent (same Cosmos) | `azd ai agent invoke` → gpt-5.4 briefing grounded in **Foundry IQ** with cited sources (`nighttime-wandering.md`, `exit-seeking-elopement.md`, …), reading the same events |
+| Safety authority | the cloud/hosted agent **never** set or changed the risk level — the edge remained the sole safety authority |
+
+This closes the loop the design promised: the edge **decides and acts locally**, only the
+structured `DailyLivingEvent` crosses the privacy boundary, and the cloud reasons
+**asynchronously** — records to Cosmos, a considered assessment + policy hint back to the edge,
+and warm cited briefings out to family/clinicians.
