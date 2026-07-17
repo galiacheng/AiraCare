@@ -72,6 +72,23 @@ scrubbed events to a flat CSV (`python powerbi/generate.py`) that a **Power BI**
 — the hackathon stand-in for the production Cosmos DB → Fabric/OneLake mirror (see
 `powerbi/README.md`).
 
+### Live dashboard
+
+`airacare_foundry/dashboard/` serves a **self-contained web dashboard** (stdlib `http.server`,
+**no new dependencies**) that reads the same `EventStore` and renders the population-/
+longitudinal-care story live: the cognitive trajectory + trend line, the event mix by week, the
+escalation funnel (edge vs. cloud grade), the nighttime-wander risk signal, the family/clinician
+briefings, and the raw scrubbed events. Charts use Chart.js (CDN); everything else works offline.
+
+```powershell
+# Seeds the demo month if the store is empty, then serves on http://127.0.0.1:8973/
+python -m airacare_foundry.dashboard.server --seed
+# Against production Cosmos (needs the [cosmos] extra + AAD/az login or key):
+python -m airacare_foundry.dashboard.server --backend cosmos --config config.yaml
+```
+
+It reads whatever the configured backend holds, so pointing it at Cosmos shows live filed events.
+
 ## Layout
 
 ```
@@ -83,6 +100,7 @@ airacare_foundry/
   assess/           # considered assessor (personalized) + policy (reads the state store)
   store/            # base protocols + local SQLite stores (state + policy + events) + Cosmos impls
   agents/           # DELIBERATE tier + policy-learning + escalation + knowledge + cognitive-trend + briefing
+  dashboard/        # live web dashboard: data.py (payload) + server.py (stdlib http) + static/ (page)
   tools/            # notification/escalation timers + demo seed + Power BI export
 tests/              # parity + a2a + store + orchestrator + personalization + policy + knowledge + trend/briefing
 powerbi/            # Power BI pitch asset: generate.py -> sample_events.csv + dashboard README

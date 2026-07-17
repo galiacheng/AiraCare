@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AiraCare — Care Dashboard</title>
+  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◇</span>
+      <div>
+        <h1>AiraCare</h1>
+        <p class="tagline">A guardian that watches on the edge, thinks in the cloud.</p>
+      </div>
+    </div>
+    <div class="patient" id="patient-chip">
+      <span class="dot" id="backend-dot"></span>
+      <span id="patient-name">—</span>
+      <span class="sep">·</span>
+      <span id="disease-stage" class="muted">—</span>
+      <span class="sep">·</span>
+      <span id="backend-label" class="muted">—</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="kpis" id="kpis" aria-label="Key metrics"></section>
+
+    <section class="grid">
+      <article class="card wide">
+        <div class="card-head">
+          <h2>Cognitive trajectory</h2>
+          <span class="hint" id="trend-summary">—</span>
+        </div>
+        <div class="chart"><canvas id="trend-chart"></canvas></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Event mix</h2>
+          <span class="hint">by ISO week</span>
+        </div>
+        <div class="chart"><canvas id="mix-chart"></canvas></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Escalation funnel</h2>
+          <span class="hint">edge vs. cloud grade</span>
+        </div>
+        <div class="chart"><canvas id="funnel-chart"></canvas></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Nighttime risk</h2>
+          <span class="hint">wander · night · door open</span>
+        </div>
+        <div class="chart"><canvas id="night-chart"></canvas></div>
+      </article>
+
+      <article class="card briefings" id="briefings">
+        <div class="card-head"><h2>Briefings</h2><span class="hint">latest event day / month</span></div>
+        <div class="briefing" id="briefing-family"></div>
+        <div class="briefing" id="briefing-clinician"></div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Filed events</h2>
+        <span class="hint">privacy-scrubbed · most recent first</span>
+      </div>
+      <div class="table-wrap"><table id="events-table"></table></div>
+    </section>
+
+    <p class="privacy">
+      Privacy invariant: only derived <code>DailyLivingEvent</code> data is shown — never raw
+      audio/video, and no feature vector beyond the single reduced voice-biomarker index.
+    </p>
+  </main>
+
+  <div id="error" class="error hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
