@@ -5,13 +5,15 @@ The demo shows the three pitch anchors — **hybrid division of labor**, the **p
 boundary**, and **graded escalation** — plus **real-time voice**, **on-device LLM
 understanding**, and **offline resilience (store-and-forward)**.
 
-> **Cloud side (now built — same repo).** The Foundry **Care Orchestrator** is implemented
-> and deployed: a deterministic **A2A drop-in** (`foundry-a2a-server/`) that speaks the frozen
-> contract and writes to Cosmos, plus a **deployed Azure AI Foundry Agent Service**
-> conversational agent (`foundry-hosted-agent/`) on `gpt-5.4` with a Foundry IQ knowledge base.
-> Beats 1–4 below demo the **edge** against a local A2A stub (fast + offline-safe); **Beats 5–6**
-> add the live cloud agent and the care dashboard. Switching the edge to real Foundry is
-> config-only (`cloud.mode: foundry`).
+> **Cloud side (now built — same repo).** The Foundry **Care Orchestrator** is a **hosted agent**
+> (`foundry-hosted-agent/`) deployed on **Azure AI Foundry Agent Service** (`gpt-5.4` + a Foundry IQ
+> knowledge base) and reachable over the **standard A2A protocol**. Deterministic pre-model
+> middleware computes the **considered level** and starts the **escalation ladder** (never the
+> advisory model), and a persistence middleware writes every scrubbed `DailyLivingEvent` to
+> **Cosmos DB**. The edge speaks A2A **directly** to it (`cloud.mode: foundry`) — there is no
+> bespoke A2A server. Beats 1–4 below demo the **edge** against its in-process stub (fast +
+> offline-safe); **Beats 5–6** add the live cloud agent and the standalone care dashboard
+> (`dashboard/`).
 
 ---
 
@@ -107,29 +109,27 @@ python -m airacare_edge.cli --scenario reply-ok --cloud a2a
 **Say:** *"The moment the cloud is reachable again, the edge **re-syncs** the queued event
 automatically."* → look for `🔁 re-synced 1 queued event(s)`.
 
-### Beat 5 — The cloud thinks (live Foundry Agent Service)
-Show the async cloud depth the edge never waits on. Two options:
+### Beat 5 — The cloud thinks (live Foundry Agent Service, over A2A)
+Show the async cloud depth the edge never waits on. The edge already spoke A2A directly to the
+hosted agent in Beats 1–4's live variant; here, invoke the deployed agent conversationally to show
+its reasoning:
 
 ```powershell
-# A) The deterministic A2A drop-in (offline-safe; set store.backend: cosmos for Cosmos via Managed Identity)
-cd foundry-a2a-server
-python -m airacare_foundry.a2a_server --config config.yaml     # or point the edge at a deployed Foundry endpoint
-
-# B) The deployed conversational agent (Azure AI Foundry Agent Service, gpt-5.4 + Foundry IQ)
+# The deployed hosted agent (Azure AI Foundry Agent Service, gpt-5.4 + Foundry IQ)
 cd foundry-hosted-agent
 azd ai agent invoke "Give me a short recap of last night for the family."
 ```
-**Say:** *"The edge already acted. Asynchronously, the cloud files the event to Cosmos and —
-on request — a **hosted agent on gpt-5.4** consults six specialists, grounds its advice in a
-**Foundry IQ** knowledge base with citations, and returns a warm family briefing. It never sets
-the risk level — the edge remains the sole safety authority."*
+**Say:** *"The edge already acted. Asynchronously, the same hosted agent that graded the event
+deterministically also consults six specialists, grounds its advice in a **Foundry IQ** knowledge
+base with citations, and returns a warm family briefing. It never sets the risk level — the
+deterministic middleware does, and the edge remains the sole safety authority."*
 
 ### Beat 6 — The care dashboard (population + longitudinal story)
 ```powershell
-cd foundry-a2a-server
-python -m airacare_foundry.dashboard.server --seed          # local demo data, or:
-python -m airacare_foundry.dashboard.server --backend cosmos # live filed events from Cosmos
-# open http://localhost:8973
+cd dashboard
+python -m airacare_dashboard.server --seed                              # local demo data, or:
+python -m airacare_dashboard.server --config config.cosmos.yaml --port 8975  # live filed events from Cosmos
+# open http://localhost:8975
 ```
 **Say:** *"Same privacy-scrubbed events, one clinician-facing view: the cognitive trajectory
 with its trend line, event mix, the edge-vs-cloud escalation funnel, and nighttime-risk by week
@@ -140,80 +140,64 @@ story."*
 
 ## 3. Live cloud demo — exact manual steps (real deployed Foundry Hosted Agent)
 
-> This is the **live** end-to-end run: the edge talks to a **local A2A orchestrator adapter**
-> (`:8971`) that runs the deterministic edge/cloud safety logic, writes every event to **live
-> Cosmos**, and — asynchronously (T2, fire-and-forget) — hands a privacy-scrubbed *case file* to the
-> **deployed Azure AI Foundry Agent Service** agent (`airacare-care-orchestrator` **v5**, `gpt-5.4` +
-> Foundry IQ) for an advisory briefing. A **live dashboard** (`:8975`) reads the *same* Cosmos, so you
-> watch each event land. Unlike Beats 1–4 (local stub, offline-safe), this uses real cloud + real
-> Cosmos.
+> This is the **live** end-to-end run: the edge (`cloud.mode: foundry`) speaks the **standard A2A
+> protocol directly** to the **deployed Azure AI Foundry Agent Service** agent
+> (`airacare-care-orchestrator`, `gpt-5.4` + Foundry IQ). Inside the hosted agent, deterministic
+> pre-model middleware computes the **considered level** + runs the **escalation ladder**, and a
+> persistence middleware writes every scrubbed `DailyLivingEvent` to **live Cosmos**; the model then
+> narrates a family briefing. The edge parses the deterministic `CONSIDERED ASSESSMENT (JSON)` block
+> back out of the A2A response. A **standalone dashboard** (`:8975`) reads the *same* Cosmos, so you
+> watch each event land. Unlike Beats 1–4 (in-process stub, offline-safe), this uses real cloud +
+> real Cosmos. There is **no `:8971` adapter** — the edge talks to Foundry directly.
 
-**Why the edge endpoint is `:8971` (local) and not the Foundry URL:** the edge speaks the frozen
-**A2A / JSON-RPC** contract; the deployed Foundry agent speaks the OpenAI **Responses** protocol. The
-`:8971` adapter is the bridge — it does the deterministic assessment + Cosmos write, then calls the
-deployed agent. The edge never blocks on the cloud, and the deployed agent is **advisory only** — it
-restates the considered level and **never sets it**.
+**The hosted agent is advisory-only for the risk level:** the considered level and the escalation
+ladder are computed by deterministic middleware **before** the model runs; the model only narrates.
+The edge never blocks on the cloud — it already graded and acted locally.
 
 ```mermaid
 flowchart LR
-  E["Edge agent<br/>(cli, A2A/JSON-RPC)"] -- "airacare.report" --> A["Local A2A adapter :8971<br/>deterministic safety + Cosmos write"]
-  A -- "async case file (Responses)" --> F["Deployed Foundry Hosted Agent v5<br/>gpt-5.4 + Foundry IQ (advisory)"]
-  A -- "scrubbed DailyLivingEvent" --> C[("Cosmos DB")]
+  E["Edge agent<br/>(cli, mode: foundry, standard A2A)"] -- "message/send (DailyLivingEvent)" --> F["Deployed Foundry Hosted Agent<br/>gpt-5.4 + Foundry IQ<br/>deterministic middleware:<br/>considered level + escalation + Cosmos write"]
+  F -- "scrubbed DailyLivingEvent" --> C[("Cosmos DB")]
+  F -- "CONSIDERED ASSESSMENT (JSON) + briefing" --> E
   D["Dashboard :8975"] -- reads --> C
 ```
 
 ### 3.0 One-time env (Azure)
 ```powershell
-az login                      # AAD token for the deployed agent + Key Vault access
-# Cosmos primary key -> env (both the adapter and dashboard read it):
+az login                      # AAD identity for the A2A endpoint + Key Vault access
+
+# Entra token the edge presents to the Foundry A2A endpoint (resource: https://ai.azure.com):
+$env:AIRACARE_A2A_TOKEN = (az account get-access-token `
+  --resource https://ai.azure.com --query accessToken -o tsv)
+
+# Cosmos primary key -> env (the dashboard reads it):
 $env:AIRACARE_COSMOS_KEY = (az keyvault secret show `
   --vault-name kv-airacare-beq4os --name airacare-cosmos-primary-key --query value -o tsv)
 ```
-The deployed agent is already live in Foundry Agent Service — **nothing to start**. Its Responses
-endpoint is configured under `deliberate.hosted_agent_endpoint` (value =
-`AGENT_AIRACARE_CARE_ORCHESTRATOR_RESPONSES_ENDPOINT` from
-`foundry-hosted-agent/.azure/airacare-agent/.env`). Install the cloud deps once:
-`pip install -e "foundry-a2a-server[agents]"`.
+The deployed agent is already live in Foundry Agent Service — **nothing to start**. Its A2A base
+endpoint is:
+`https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/a2a`
 
-Use a **cosmos + hosted-agent** config (the session's `config.cosmos-foundry.yaml`, or add these keys
-to `foundry-a2a-server/config.yaml`):
-```yaml
-store:
-  backend: cosmos
-  cosmos_endpoint: "https://airacare-5cciixoa3zpdk.documents.azure.com:443/"
-  cosmos_credential: "${AIRACARE_COSMOS_KEY}"
-  cosmos_database: airacare
-  cosmos_auth: key
-deliberate:
-  enabled: true
-  executor: agents
-  hosted_agent_endpoint: "https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/openai/responses?api-version=v1"
-  hosted_agent_name: airacare-care-orchestrator
-```
+Point the edge at it via `cloud.mode: foundry` + `cloud.a2a_endpoint` (in `edge/config.yaml`, or with
+`--cloud foundry --endpoint <url>`). The token is read from `AIRACARE_A2A_TOKEN` (or a `${VAR}`
+reference in `cloud.a2a_token`) — **never** inline the secret. Install the dashboard's Cosmos deps
+once: `pip install -e "dashboard[cosmos]"`.
 
-### 3.1 Terminal 1 — start the A2A orchestrator adapter (:8971)
+### 3.1 Terminal 1 — start the standalone care dashboard (:8975, reads Cosmos)
 ```powershell
-cd foundry-a2a-server
-python -m airacare_foundry.a2a_server --config config.cosmos-foundry.yaml
-```
-Expect: `AiraCare Foundry orchestrator listening on http://127.0.0.1:8971/a2a  [open (no auth)]`.
-The async advisory briefing runs off the safety path and is filed to the event store / visible on the
-dashboard — it is **not** echoed to this console by default (see the presenter aid at the end of §3).
-
-### 3.2 Terminal 2 — start the live care dashboard (:8975, reads Cosmos)
-```powershell
-cd foundry-a2a-server
-python -m airacare_foundry.dashboard.server --config config.cosmos-foundry.yaml --host 127.0.0.1 --port 8975
+cd dashboard
+python -m airacare_dashboard.server --config config.cosmos.yaml --host 127.0.0.1 --port 8975
 # open http://127.0.0.1:8975/
 ```
 
-### 3.3 Terminal 3 — the four patient responses (edge), one at a time
-The edge detects the 3 AM wake, **asks "are you okay?" aloud** (local voice), then acts on the reply
-and asynchronously reports to the adapter. Run each line, narrate, then refresh the dashboard.
+### 3.2 Terminal 2 — the four patient responses (edge → Foundry A2A), one at a time
+The edge detects the 3 AM wake, **asks "are you okay?" aloud** (local voice), acts on the reply, and
+reports over standard A2A directly to the deployed hosted agent. Run each line, narrate, then refresh
+the dashboard.
 
 ```powershell
 cd edge
-$EP = "http://127.0.0.1:8971/a2a"
+$EP = "https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/a2a"
 
 # 1) No response  -> edge escalates on its own -> L3
 python -m airacare_edge.cli --scenario no-response --cloud foundry --endpoint $EP --voice local --panel
@@ -237,19 +221,20 @@ What to point at per run:
 | `distress` | "help me" | escalated **L3** | L3 | keyword fast-path |
 | `unclear` | "the garden over there" | re-interpret, then act | per LLM | **🧠 LLM engages** |
 
-Each run prints the split-screen `--panel` (left = edge acted; right = Foundry replying **async**; red
-strip = the only thing that crossed — a structured `DailyLivingEvent`, never audio).
+Each run prints the split-screen `--panel` (left = edge acted; right = Foundry replying **async** over
+A2A; red strip = the only thing that crossed — a structured `DailyLivingEvent`, never audio). The
+considered level shown on the right is the deterministic verdict the hosted agent's middleware
+computed and returned in the `CONSIDERED ASSESSMENT (JSON)` block.
 
-### 3.4 Watch Cosmos fill up
+### 3.3 Watch Cosmos fill up
 Refresh `http://127.0.0.1:8975/` after each scenario — event count, cognitive trajectory, event mix,
-and the edge-vs-cloud escalation funnel update **live** from the same Cosmos the adapter just wrote.
+and the edge-vs-cloud escalation funnel update **live** from the same Cosmos the hosted agent just
+wrote via its persistence middleware.
 
-> **Presenter aid — echo the deployed agent's briefing live.** To surface the async T2 advisory
-> briefing (and a `REAL DEPLOYED Foundry Hosted Agent (airacare-care-orchestrator v5)` banner) on the
-> adapter console during the demo, start Terminal 1 with the thin demo wrapper
-> `run_deployed_orchestrator.py <config>` instead of the module in §3.1. It wraps the config-built
-> narrator and prints each briefing to stderr; behavior is otherwise identical (same Cosmos writes,
-> same `:8971` A2A endpoint).
+> **Note on the A2A wire.** The Foundry A2A endpoint defaults to **v0.3 JSONRPC** (`message/send`
+> then poll `tasks/get`); the task completes in ~15–20 s. Pinning `A2A-Version: 1.0` changes the
+> method names and yields `METHOD_NOT_FOUND` — the edge client uses the default v0.3 path. Because
+> the edge reports on a **background worker**, this latency never touches the local safety path.
 
 ---
 
@@ -271,15 +256,18 @@ and the edge-vs-cloud escalation funnel update **live** from the same Cosmos the
 
 ## 5. Switching the edge to the real Foundry agent
 
-No edge code changes — just config:
+No edge code changes — just config (`edge/config.yaml`):
 ```yaml
 cloud:
   mode: foundry
-  a2a_endpoint: "https://<foundry-hosted-agent-endpoint>/a2a"
+  a2a_endpoint: "https://<account>.services.ai.azure.com/api/projects/<project>/agents/<agent>/endpoint/protocols/a2a"
+  a2a_token: "${AIRACARE_A2A_TOKEN}"   # env reference — never inline the secret
 ```
-The edge already speaks the A2A/JSON-RPC contract (`airacare.report` → `CloudAssessment`,
-`airacare.fetch_policy` → `EdgePolicyUpdate`); point it at the real endpoint and provide
-credentials as required.
+`mode: foundry` speaks **standard A2A** (`message/send` + `tasks/get`) straight to the deployed hosted
+agent — no bespoke server in the path. Authenticate with an Entra token for the
+`https://ai.azure.com` resource (role: Foundry Agent Consumer+); the client reads it from
+`cloud.a2a_token` (a `${VAR}` reference) or the `AIRACARE_A2A_TOKEN` env fallback. The deterministic
+considered level comes back in the `CONSIDERED ASSESSMENT (JSON)` block the hosted agent appends.
 
 ---
 

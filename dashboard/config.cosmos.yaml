@@ -1,0 +1,21 @@
+# Sample dashboard config for the LIVE demo — reads the daily_event store the Foundry
+# hosted agent writes to Azure Cosmos DB. Copy/edit and pass with --config.
+#
+# The Cosmos key is injected from the environment (never inlined here):
+#   $env:AIRACARE_COSMOS_KEY = (az keyvault secret show `
+#     --vault-name <kv> --name airacare-cosmos-primary-key --query value -o tsv)
+#
+# Or use Managed Identity / az login instead of a key: set cosmos_auth: aad and drop the key.
+
+patient:
+  id: p-001
+  name: Grandpa Zhang
+  disease_stage: moderate
+
+store:
+  backend: cosmos
+  cosmos_endpoint: "https://airacare-5cciixoa3zpdk.documents.azure.com:443/"
+  cosmos_credential: "${AIRACARE_COSMOS_KEY}"
+  cosmos_database: airacare
+  cosmos_auth: key
+  cosmos_tls_verify: true

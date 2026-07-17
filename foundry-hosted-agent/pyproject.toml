@@ -1,0 +1,15 @@
+# Offline test + lint config for the Foundry hosted agent.
+#
+# There is intentionally no build/package section: the hosted agent ships as a container
+# (Dockerfile COPYs src/airacare-care-orchestrator/ and runs main.py). This file only configures
+# the OFFLINE test suite for the deterministic ``airacare_care`` domain — the tests never import
+# main.py (which needs the cloud-only agent-framework / azure deps), only the pure package.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+# Default rule set + line-length 100 — kept consistent with the rest of the repo (edge/, dashboard/)
+# so the ported deterministic files stay lint-consistent and we don't impose a stricter ruleset here.
+line-length = 100
+target-version = "py310"

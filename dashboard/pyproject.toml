@@ -1,0 +1,38 @@
+[project]
+name = "airacare-dashboard"
+version = "0.1.0"
+description = "AiraCare care dashboard — read-only population/longitudinal view over filed events"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Live backend: read the daily_event store the Foundry hosted agent writes to Azure Cosmos DB.
+# azure-identity enables AAD / Managed Identity auth (store.cosmos_auth: aad); the account-key
+# path needs only azure-cosmos. Imported lazily so the offline (local SQLite) dry-run never
+# needs the SDK.
+cosmos = [
+    "azure-cosmos>=4.7",
+    "azure-identity>=1.17",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["airacare_dashboard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

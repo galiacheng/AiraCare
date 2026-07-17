@@ -1,8 +1,9 @@
 """Factory that builds the right CloudGateway from config.
 
 - ``stub``    -> in-process gateway (no network) — fastest for dev/tests.
-- ``a2a``     -> A2A client to the local stub server (real HTTP, drop-in shape).
-- ``foundry`` -> A2A client to the real Foundry Hosted Agent (same client, real endpoint).
+- ``a2a``     -> bespoke JSON-RPC client to the local stub server (real HTTP, drop-in shape).
+- ``foundry`` -> standard-A2A client to the real Foundry Hosted Agent (``message/send`` + task
+  poll, Entra bearer). The bespoke ``foundry-a2a-server`` is no longer in the path.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import re
 
 from airacare_edge.agent import CloudGateway
 from airacare_edge.cloud.a2a_client import A2AClient
+from airacare_edge.cloud.foundry_client import FoundryA2AClient
 from airacare_edge.cloud.stub import LocalCloudStub
 from airacare_edge.config import EdgeConfig
 
@@ -36,5 +38,10 @@ def _resolve_token(raw: str | None) -> str | None:
 def make_cloud_client(config: EdgeConfig) -> CloudGateway:
     if config.cloud.mode == "stub":
         return LocalCloudStub()
-    # "a2a" (local stub server) and "foundry" (real hosted agent) both speak A2A/HTTP.
-    return A2AClient(config.cloud.a2a_endpoint, token=_resolve_token(config.cloud.a2a_token))
+    token = _resolve_token(config.cloud.a2a_token)
+    if config.cloud.mode == "foundry":
+        # Standard A2A to the real Foundry hosted agent (Entra bearer; falls back to azure-identity
+        # when no token is injected). The endpoint is the agent's a2a protocol base URL.
+        return FoundryA2AClient(config.cloud.a2a_endpoint, token=token)
+    # "a2a" -> bespoke JSON-RPC client to the local stub server.
+    return A2AClient(config.cloud.a2a_endpoint, token=token)

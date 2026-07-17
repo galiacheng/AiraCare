@@ -13,6 +13,7 @@ import json
 from airacare_edge.cloud import a2a_client as a2a_mod
 from airacare_edge.cloud.a2a_client import A2AClient
 from airacare_edge.cloud.factory import make_cloud_client
+from airacare_edge.cloud.foundry_client import FoundryA2AClient
 from airacare_edge.cloud.stub import LocalCloudStub
 from airacare_edge.config import CloudConfig, EdgeConfig, PatientConfig
 
@@ -34,7 +35,7 @@ def test_env_reference_token_resolved_from_environment(monkeypatch):
     client = make_cloud_client(
         _config(mode="foundry", a2a_endpoint="https://host/", a2a_token="${AIRACARE_A2A_TOKEN}")
     )
-    assert isinstance(client, A2AClient)
+    assert isinstance(client, FoundryA2AClient)
     assert client._token == "secret-xyz"
 
 

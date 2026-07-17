@@ -1,18 +1,21 @@
 # AiraCare — Foundry Hosted Agent (care-orchestrator)
 
-Graduates the AiraCare cloud **care-orchestrator** — the six DELIBERATE-tier Connected Agents on
-the **Microsoft Agent Framework** — into an **Azure AI Foundry Hosted Agent** that speaks the
-**Responses** protocol.
+Graduates the AiraCare cloud **care-orchestrator** into an **Azure AI Foundry Hosted Agent** on the
+**Microsoft Agent Framework**. It exposes both the **A2A** and **Responses** protocols, so it is now
+the **live cloud endpoint the edge talks to directly over standard A2A** — the retired local
+`foundry-a2a-server/` (the bespoke JSON-RPC shim) has been folded into this agent.
 
-This is a **new conversational surface** for family caregivers and clinicians. It is **advisory /
-narrative only** and is **distinct from** (does not replace):
+The agent has two faces sharing one deployment:
 
-- the frozen **edge A2A safety path** (`airacare.report` / `airacare.fetch_policy`), and
-- the existing **local A2A server** (`foundry-a2a-server/`, the cloud care orchestrator + adapter).
+- **Deterministic safety path** — pre-model middleware (`airacare_care/`, ported from the retired
+  server) computes the considered level and drives the escalation ladder, then persists the
+  scrubbed `DailyLivingEvent` to Cosmos via Managed Identity. This is what the edge consumes.
+- **Advisory narrator** — the model turns that deterministic verdict into a warm, plain-language
+  briefing for family caregivers and clinicians.
 
-The model never sets or changes the risk level and never triggers escalation — the deterministic
-edge/cloud Python agents remain the sole authority. See the safety framing in
-`foundry-a2a-server/airacare_foundry/agents/agent_framework.py` (FH6).
+The model **never sets or changes the risk level and never triggers escalation** — the deterministic
+Python middleware remains the sole authority; the LLM only narrates the verdict it is handed. See the
+safety framing in `src/airacare-care-orchestrator/main.py` (the `ConsideredAssessmentMiddleware`).
 
 ## Layout
 

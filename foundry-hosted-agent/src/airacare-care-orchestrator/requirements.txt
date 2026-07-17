@@ -2,6 +2,10 @@ agent-framework-foundry
 agent-framework-foundry-hosting>=1.0.0a260630
 python-dotenv
 
+# Deterministic care domain (airacare_care package): the considered assessor + escalation ladder.
+# agent-framework already pulls pydantic, but airacare_care imports it directly, so pin it here too.
+pydantic>=2.6
+
 # Care-record data access (AAD only; read daily_event/patient_state, write care_briefing).
 azure-cosmos>=4.5.0
 # Fetch the Cosmos key from Key Vault with Managed Identity (deployed hosted agent).

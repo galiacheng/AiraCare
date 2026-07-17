@@ -37,23 +37,27 @@ report worker uses a ~5 s timeout, then falls back to the store-and-forward queu
 slow or missing response only delays *records and caregiver enrichment* — never the
 patient-facing action, which already happened on the edge.
 
-> **As built (2026-07 — reconciled to reality).** The cloud is implemented across **two
-> folders**, both live:
-> - **`foundry-a2a-server/`** — the deterministic **A2A drop-in** that speaks the frozen
->   `airacare.report` / `airacare.fetch_policy` contract. Pure Python (no LLM on this path),
->   runs offline/CI, writes derived `DailyLivingEvent`s to **Cosmos DB via Managed Identity**,
->   and powers the **live care dashboard** (`airacare_foundry/dashboard/`, stdlib server +
->   Chart.js). This is the safety-adjacent records path.
-> - **`foundry-hosted-agent/`** — the **deployed Azure AI Foundry Agent Service** conversational
->   surface (Responses protocol): an orchestrator + **six connected specialists** on the
->   Microsoft Agent Framework running on **`gpt-5.4`**, grounded by a **Foundry IQ** knowledge
->   base, reading the same Cosmos events/state. It is **advisory / narrative only** and never
->   sets the risk level or triggers escalation.
+> **As built (reconciled to reality).** The cloud is a **single deployed hosted agent**
+> (`foundry-hosted-agent/`) plus a **standalone read-only dashboard** (`dashboard/`):
+> - **`foundry-hosted-agent/`** — the **deployed Azure AI Foundry Agent Service** agent that
+>   answers the edge over the **standard A2A protocol** (`message/send` + `tasks/get`).
+>   **Deterministic pre-model middleware** (pure Python, no LLM on the safety verdict) computes the
+>   considered level + runs the escalation ladder and returns it in a `CONSIDERED ASSESSMENT (JSON)`
+>   block; a persistence middleware writes derived `DailyLivingEvent`s to **Cosmos DB via Managed
+>   Identity**. The **model** narrates a caregiver briefing grounded by a **Foundry IQ** knowledge
+>   base (agentic RAG over Azure AI Search) on **`gpt-5.4`** — **advisory / narrative only**, it
+>   never sets the risk level or triggers escalation. The retired `foundry-a2a-server` is gone; the
+>   edge speaks A2A directly to this agent.
+> - **`dashboard/`** — a self-contained **live care dashboard** (stdlib server + Chart.js) that
+>   *reads* the same Cosmos `daily_event` store the hosted agent writes. Read-only; off the safety
+>   path.
 >
 > Divergences from the original decisions above, now folded in: Knowledge moved from raw
 > Azure AI Search to **Foundry IQ** (#4); models are **`gpt-5.4`/`gpt-5.4-mini`**, not GPT-4o
-> (#5); and analytics is a **self-hosted live dashboard** rather than Power BI on OneLake (#6,
-> still the stated production target). The frozen edge contract is unchanged.
+> (#5); analytics is a **self-hosted live dashboard** rather than Power BI on OneLake (#6, still the
+> stated production target); and the deterministic assessment/escalation that once lived in a
+> separate A2A server now runs **inside the hosted agent** as pre-model middleware. The frozen edge
+> report contract is unchanged.
 
 ## 2. Design principles
 
@@ -221,7 +225,7 @@ Fabric mirror handle analytics with no ETL:
 | **Patient State** (baseline, stage, contacts, history) | **Azure Cosmos DB**, partition = `patient_id` | single-digit-ms → keeps the report response prompt |
 | **Edge policy** (versioned per patient) | **Azure Cosmos DB**, partition = `patient_id` | served by `fetch_policy`; edge pulls on a `policy_version` bump |
 | Analytics / trends / longitudinal modeling | **Microsoft Fabric** (Eventhouse/KQL + Lakehouse/Delta, Spark) via **Cosmos→OneLake mirroring** | zero-copy, no ETL *(stated production target — not built; superseded for the demo by the live dashboard below)* |
-| Family daily / clinician monthly reports | **Live care dashboard** (`airacare_foundry/dashboard/`, stdlib server + Chart.js) reading the same EventStore; Power BI on OneLake is the stated production target | native dashboards |
+| Family daily / clinician monthly reports | **Live care dashboard** (`dashboard/`, stdlib server + Chart.js) reading the same Cosmos `daily_event` store; Power BI on OneLake is the stated production target | native dashboards |
 | Condition-based alert triggers | **Data Activator** | complements the agent's escalation ladder *(stated production target — not built)* |
 | Care-guidelines KB (RAG) | **Foundry IQ** knowledge base (agentic retrieval over Azure AI Search vectors, `gpt-5.4` planner) | enterprise knowledge, kept separate from patient data; returns **cited** snippets |
 
@@ -268,60 +272,60 @@ Because raw modality data stays on the edge, Foundry's multi-modal understanding
 
 ## 10. Repo / module layout — as built
 
-**Two cloud folders** (both live):
+**One deployed hosted agent + one standalone dashboard:**
 
 ```
-foundry-a2a-server/              # the deterministic A2A drop-in + Cosmos writer + live dashboard
-  pyproject.toml
-  config.yaml                    # models, store mode (local|cosmos), contacts (Foundry IQ lives in foundry-hosted-agent/)
-  airacare_foundry/
-    a2a_server.py                # A2A/JSON-RPC: airacare.report -> CloudAssessment + airacare.fetch_policy -> EdgePolicyUpdate (drop-in for a2a_stub)
-    orchestrator.py              # Care Orchestrator: T1 considered assessment + enqueue T2
-    dashboard/                   # AS BUILT: live care dashboard (stdlib http.server + Chart.js) reading the EventStore (local|cosmos)
-    assess/
-      assessor.py                # patient-state-aware considered-level policy (parity+ with stub); IS the "risk-reasoning" logic
-      policy.py                  # L0–L3 thresholds × disease stage
-    agents/                      # T2 Connected Agents
-      # risk_reasoning: folded into assess/assessor.py; surfaced as the "risk-reasoning" connected agent in agent_framework.py
-      agent_framework.py         # AS BUILT: MAF executor + connected-agent/tool specs (the hosted-agent brain)
-      knowledge.py               # local in-memory RAG (offline demo/CI); prod = Foundry IQ KB (foundry-hosted-agent/knowledge/)
-      escalation.py              # ack-tracked ladder
-      cognitive_trend.py         # batch modeling
-      briefing.py                # family/clinician reports
-      policy_learning.py         # distills EdgePolicyUpdate (version++)
-    tools/
-      notify.py                  # push/SMS (also backs the geofence placeholder)
-      # geofence: placeholder only (descriptor wraps notify); real GeofenceTool not yet built
-      escalation_timer.py
-      demo_seed.py               # AS BUILT: seeds the 30-day demo history (local|cosmos)
-      powerbi_export.py          # AS BUILT: record_to_row scrubbed CSV export (feeds the live dashboard)
-    store/
-      base.py                    # PatientStateStore + PolicyStore protocols
-      local.py                   # SQLite/in-memory (MVP)  ← used for the demo
-      cosmos.py                  # production (mirrored to Fabric/OneLake)
-    contracts.py                 # re-uses the SAME DailyLivingEvent / CloudAssessment / EdgePolicyUpdate models
-  tests/
-    test_report_parity.py        # returns the same CloudAssessment as the stub for the flagship
-    test_fetch_policy.py         # fetch_policy returns EdgePolicyUpdate only when version changed
-    test_escalation_ladder.py
-    test_dashboard.py            # AS BUILT: dashboard data layer + HTTP endpoints
-
-foundry-hosted-agent/            # the DEPLOYED Azure AI Foundry Agent Service conversational surface
-  azure.yaml                     # azd + microsoft.foundry: model deployment + hosted agent
+foundry-hosted-agent/            # the DEPLOYED Azure AI Foundry Agent Service agent (answers standard A2A)
+  azure.yaml                     # azd + microsoft.foundry: model deployment + hosted agent (protocols: [a2a, responses])
+  pyproject.toml                 # offline test/lint config for the ported deterministic logic
   knowledge/                     # care-guideline corpus + Foundry IQ knowledge-base setup
+  infra/                         # provision_foundry_iq.py etc. (IaC / provisioning helpers)
   src/airacare-care-orchestrator/
-    main.py                      # orchestrator + six specialists (as tools) on gpt-5.4 via FoundryChatClient
-    eval/ · evaluators/          # AS BUILT: agent evaluation suite (golden set + rubric)
+    main.py                      # the hosted agent: deterministic middleware + orchestrator/narrator on gpt-5.4
+                                 #   ConsideredAssessmentMiddleware (pre-model): compute considered level + start
+                                 #     escalation ladder + stash verdict; post-model: append CONSIDERED ASSESSMENT (JSON)
+                                 #   DailyEventPersistenceMiddleware: write scrubbed DailyLivingEvent to Cosmos (via MI)
+    airacare_care/               # ported deterministic core (pure Python, no LLM on the safety verdict)
+      assessor.py                # patient-state-aware considered-level policy (parity+ with the edge stub)
+      escalation.py              # ack-tracked family→community→emergency ladder
+      escalation_timer.py        # Scheduler protocol + thread/manual timers
+      state.py                   # PatientState resolution
+      notify.py                  # caregiver notification tool
+      render.py                  # renders the CONSIDERED ASSESSMENT (JSON) block the edge parses
+      contracts.py               # the SAME DailyLivingEvent / CloudAssessment models (byte-compatible with edge)
+    eval/ · evaluators/          # agent evaluation suite (golden set + rubric)
+    Dockerfile · requirements.txt
+  tests/
+    test_considered_assessor.py  # deterministic considered-level parity + personalization
+    test_escalation.py           # ack-tracked ladder
+    test_render.py               # the CONSIDERED ASSESSMENT (JSON) block
+
+dashboard/                       # the STANDALONE live care dashboard (read-only over Cosmos; off the safety path)
+  pyproject.toml                 # deps: pydantic + pyyaml (+ optional [cosmos] = azure-cosmos + azure-identity)
+  config.cosmos.yaml             # sample live config (store.backend: cosmos, key via ${AIRACARE_COSMOS_KEY} or AAD)
+  airacare_dashboard/
+    server.py                    # stdlib http.server + CLI (python -m airacare_dashboard.server); default port 8975
+    data.py                      # DashboardData: filed events -> the dashboard JSON payload
+    analytics.py                 # cognitive trend + briefings + flattened rows (compute, not tokens)
+    stores.py                    # store protocols + LocalEventStore + CosmosEventStore (reads the hosted agent's daily_event)
+    seed.py                      # deterministic demo month (offline dry-run / tests only)
+    config.py · contracts.py     # DashboardConfig (patient + store); trimmed read-only DailyLivingEvent
+    static/                      # single-page front-end (index.html, app.css, app.js — Chart.js via CDN)
+  tests/
+    test_dashboard.py            # data layer + HTTP endpoints (offline; in-memory SQLite + ephemeral-port smoke)
 ```
 
-`contracts.py` must stay byte-compatible with `edge/airacare_edge/cloud/contracts.py`
-(share or vendor the same pydantic models).
+The `contracts.py` in each folder stays byte-compatible with `edge/airacare_edge/cloud/contracts.py`
+(share or vendor the same pydantic models). The edge reaches the hosted agent over **standard A2A**
+(`edge/airacare_edge/cloud/foundry_client.py`); there is **no bespoke A2A server** — the former
+`foundry-a2a-server/` has been retired and its deterministic logic ported into the hosted agent.
 
 ## 11. Build order (MVP-first)
 
-1. **A2A server + considered assessor** returning the flagship `wander` `CloudAssessment`
-   with **parity to the stub** (proves drop-in; `test_report_parity`), plus `fetch_policy`
-   returning an `EdgePolicyUpdate` only when `policy_version` changed. ← start here
+1. **Considered assessor** returning the flagship `wander` `CloudAssessment` with **parity to the
+   edge stub** (proves the deterministic verdict; `test_considered_assessor`). *(As built: this runs
+   as **pre-model middleware inside the hosted agent**, returning the level in a `CONSIDERED
+   ASSESSMENT (JSON)` block over standard A2A — not a separate server.)* ← start here
 2. **Local PatientStateStore** (SQLite) + disease-stage/baseline personalization in the
    considered assessment.
 3. **Async escalation ladder** (family→community→emergency + ack timers) — the
@@ -330,8 +334,8 @@ foundry-hosted-agent/            # the DEPLOYED Azure AI Foundry Agent Service c
    in-memory RAG for the offline demo; production graduated to a **Foundry IQ** knowledge
    base — agentic RAG over Azure AI Search — in `foundry-hosted-agent/`.)*
 5. **Cognitive-Trend + Briefing agents** (batch) → clinician/family reporting. *(As built:
-   a **live care dashboard** — `airacare_foundry/dashboard/`, stdlib server + Chart.js —
-   reading the same EventStore; plus a Power BI CSV export as a static pitch asset.)*
+   a **standalone live care dashboard** — `dashboard/`, stdlib server + Chart.js — reading the
+   hosted agent's Cosmos `daily_event` store; plus a Power BI CSV export as a static pitch asset.)*
 6. Swap edge `cloud.mode: foundry`, run the **demo-runbook** end-to-end against real
    Foundry.
 

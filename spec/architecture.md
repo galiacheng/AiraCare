@@ -207,63 +207,62 @@ briefing + clinician monthly trend report.
 ## 8. Verified end-to-end flow — Edge → cloud orchestrator → Azure (as built, 2026-07)
 
 The hybrid loop above is **built and verified**, not just designed. The edge switches from its
-in-process stub to the A2A cloud orchestrator with **config only** (`cloud.mode: foundry`, or
-`--cloud foundry --endpoint …/a2a`) — **zero edge code changes**. The edge's *report path*
-speaks the frozen **A2A** contract (`airacare.report` / `airacare.fetch_policy`) to the
-**A2A Care Orchestrator** (`foundry-a2a-server/`), which files the `DailyLivingEvent` and
-returns the async *considered* assessment.
+in-process stub to the deployed cloud agent with **config only** (`cloud.mode: foundry`, or
+`--cloud foundry --endpoint …/protocols/a2a`) — **zero edge code changes**. The edge's *report path*
+speaks the **standard A2A** protocol (`message/send` + `tasks/get`) **directly** to the deployed
+**Foundry Hosted Agent** (`foundry-hosted-agent/`). There is **no bespoke A2A server** in the path;
+the retired `foundry-a2a-server` is gone. Deterministic pre-model middleware in the hosted agent
+computes the *considered* level and runs the escalation ladder, a persistence middleware files the
+`DailyLivingEvent` to Cosmos, and the deterministic verdict returns in a `CONSIDERED ASSESSMENT
+(JSON)` block the edge parses.
 
-> **What is actually live vs local — read this before demoing.** In the 2026-07-17 run the
-> A2A Care Orchestrator ran **locally** (`http://127.0.0.1:8971/a2a`) — that endpoint is a
-> **local process, NOT an Azure/Foundry URL**. The `foundry` mode name only selects the A2A
-> HTTP client; it does not imply a cloud endpoint. What *is* genuinely **live Azure** in the
-> run: (a) the orchestrator persisted to **Azure Cosmos DB** (`airacare-5cciixoa3zpdk`), and
-> (b) the **Hosted Agent** briefing (`azd ai agent invoke`) is **deployed on Azure AI Foundry
-> Agent Service** (gpt-5.4 + Foundry IQ). **Not yet deployed:** a *cloud-hosted A2A* endpoint —
-> the ACA A2A host (`infra/foundry.bicep`) was **removed** in favor of the Responses-protocol
-> Agent Service, which does **not** speak the edge's `airacare.report` contract. Pointing the
-> edge at a real Azure A2A URL would require deploying `foundry-a2a-server` (e.g. to ACA); the
-> edge client/contract is unchanged, so it is a deploy step, not a code change.
+> **What is actually live vs local — read this before demoing.** The **A2A endpoint is now a real
+> Azure/Foundry URL** — the deployed hosted agent's A2A protocol base
+> (`…/agents/airacare-care-orchestrator/endpoint/protocols/a2a`), reached with an Entra token
+> (resource `https://ai.azure.com`). What is genuinely **live Azure**: (a) the hosted agent runs on
+> **Azure AI Foundry Agent Service** (gpt-5.4 + Foundry IQ) and answers standard A2A; (b) its
+> middleware persists to **Azure Cosmos DB** (`airacare-5cciixoa3zpdk`) via **Managed Identity** (no
+> key). The only local pieces are the **edge** itself and the **dashboard** (a read-only viewer over
+> the same Cosmos). The A2A wire defaults to **v0.3 JSONRPC**; the task completes in ~15–20 s, which
+> never touches the edge's local safety path (it reports on a background worker).
 
-The Responses-protocol **Hosted Agent** (`foundry-hosted-agent/`, gpt-5.4 + Foundry IQ) is a
-separate *conversational* surface over the **same** Cosmos data — it is **not** on the edge's
-A2A report path.
+The **same** hosted agent also serves a *conversational* surface (`azd ai agent invoke`) over the
+**same** Cosmos data for family/clinician briefings — the model is **advisory only** and never sets
+the risk level.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant E as 🏠 Edge Agent<br/>(cloud.mode: foundry)
-    participant O as A2A Care Orchestrator<br/>(foundry-a2a-server — LOCAL :8971/a2a)
+    participant H as 💬 Foundry Hosted Agent<br/>(LIVE · Agent Service · gpt-5.4 + Foundry IQ)<br/>deterministic middleware + narrator
     participant C as 🗄 Azure Cosmos DB<br/>(LIVE · daily_event · PK /patient_id)
-    participant H as 💬 Hosted Agent<br/>(LIVE · Foundry Agent Service · gpt-5.4 + Foundry IQ)
     participant F as 👪 Family / 🩺 Clinician
 
     Note over E: 3AM wander · no response → edge decides L3 → ACTS NOW<br/>(alarm + SMS + community) — never waits on cloud
-    E->>O: POST /a2a airacare.report { DailyLivingEvent, edge_assessed_level: L3 }
-    O->>C: file DailyLivingEvent (considered L3)
-    O-->>E: CloudAssessment { considered_level: L3, policy_version: 1 }
+    E->>H: A2A message/send { DailyLivingEvent, edge_assessed_level: L3 }
+    Note over H: pre-model middleware: compute considered L3 + start escalation ladder
+    H->>C: file DailyLivingEvent (considered L3) — via Managed Identity
+    H-->>E: task completed → CONSIDERED ASSESSMENT (JSON) { considered_level: L3 } + briefing
     Note over E: edge already acted — this only enriches the record
-    E->>O: airacare.fetch_policy { patient_id, since_version } (lazy, only if changed)
-    O-->>E: EdgePolicyUpdate | null (tunes FUTURE events)
     F->>H: "Give me a short recap of last night"
     H->>C: fetch_recent_events / fetch_patient_state
     H-->>F: warm, cited briefing (advisory only — never sets the level)
 ```
 
-**Verified evidence (2026-07-17):**
+**Verified evidence (edge → Foundry A2A, live):**
 
 | Check | Result | Where it ran |
 |---|---|---|
-| Edge switch to A2A orchestrator | `--cloud foundry --endpoint http://127.0.0.1:8971/a2a` — panel cloud pane read **`foundry`** (the config mode, not the stub); **no code change** | local |
-| A2A request received | server log: `[a2a] POST /a2a method=airacare.report id=1 -> 200` | local process |
-| Async considered assessment | returned **L3**, `policy_version: 1`, + caregiver notification | local process |
-| Written to Cosmos | `daily_event` count **40 → 41**; the exact L3 wander event (`285c6512…`, `ts 2026-07-13T03:00:00Z`) filed | **live Azure Cosmos** |
-| Hosted agent (same Cosmos) | `azd ai agent invoke` → gpt-5.4 briefing grounded in **Foundry IQ** with cited sources (`nighttime-wandering.md`, `exit-seeking-elopement.md`, …), reading the same events | **live Azure Foundry Agent Service** |
-| Safety authority | the cloud/hosted agent **never** set or changed the risk level — the edge remained the sole safety authority | — |
+| Edge switch to Foundry A2A | `--cloud foundry --endpoint …/protocols/a2a` — panel cloud pane read **`foundry`**; **no code change** | local edge |
+| A2A request accepted | `message/send` accepted (Entra token, v0.3 JSONRPC); task polled to `completed` (~15–20 s) | **live Azure Foundry Agent Service** |
+| Deterministic considered assessment | hosted-agent middleware returned considered **L3** (and **L2** for the moderate default) in the `CONSIDERED ASSESSMENT (JSON)` block — computed by Python, not the model | **live Azure Foundry Agent Service** |
+| Written to Cosmos | the exact wander event filed to `daily_event` with the deterministic level — written by the app's **Managed Identity (no key)** | **live Azure Cosmos** |
+| Conversational briefing (same Cosmos) | `azd ai agent invoke` → gpt-5.4 briefing grounded in **Foundry IQ** with cited sources, reading the same events | **live Azure Foundry Agent Service** |
+| Safety authority | the hosted agent **never** set or changed the risk level — deterministic middleware owns it; the edge remained the sole safety authority | — |
 
 This exercises the loop the design promised: the edge **decides and acts locally**, only the
 structured `DailyLivingEvent` crosses the privacy boundary, and the cloud path reasons
-**asynchronously** — records to **live Cosmos**, a considered assessment + policy hint back to
-the edge, and a **live** hosted-agent cited briefing out to family/clinicians. The one honest
-caveat is that the A2A orchestrator process was local in this run; graduating it to a cloud A2A
-endpoint is a deployment step, not an edge change.
+**asynchronously** — a deterministic considered assessment back to the edge, a record to **live
+Cosmos**, and a **live** hosted-agent cited briefing out to family/clinicians. The earlier caveat
+(the A2A orchestrator was a local process) is now resolved: the deployed hosted agent **is** the live
+A2A endpoint.

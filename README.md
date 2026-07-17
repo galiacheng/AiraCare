@@ -34,7 +34,9 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
 | [`spec/foundry-design.md`](spec/foundry-design.md) | Foundry Care Orchestrator design (async considered assessment, connected agents, escalation, policy feedback, data layer) |
 | [`spec/demo-runbook.md`](spec/demo-runbook.md) | **Step-by-step demo script** |
 | [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
-| [`foundry-a2a-server/`](foundry-a2a-server/) | Foundry Care Orchestrator implementation (Python) — see [`foundry-a2a-server/README.md`](foundry-a2a-server/README.md) |
+| [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
+| [`foundry-hosted-agent/`](foundry-hosted-agent/) | Foundry **hosted agent** (`airacare-care-orchestrator`) — deterministic considered assessment + escalation + Cosmos write, deployed on Azure AI Foundry Agent Service; see [`foundry-hosted-agent/README.md`](foundry-hosted-agent/README.md) |
+| [`dashboard/`](dashboard/) | Standalone **care dashboard** (Python) reading the filed events from Cosmos — see [`dashboard/README.md`](dashboard/README.md) |
 
 ## Components
 
@@ -42,19 +44,19 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
   VAD + faster-whisper) → keyword/LLM understanding (Ollama Phi-3.5-mini) → **edge grades
   L0–L3 and acts locally** → reports the `DailyLivingEvent` via A2A → offline
   store-and-forward. **Runs CPU-only.**
-- **Foundry Care Orchestrator** (`foundry-a2a-server/` + `foundry-hosted-agent/`, this repo —
-  see [`foundry-a2a-server/README.md`](foundry-a2a-server/README.md)) — the cloud "brain", **off the real-time safety
-  path**: a **two-tier** agent (a synchronous **considered assessment** returned on the
-  report + an asynchronous **deliberate** tier for fusion / escalation / trends / policy
-  learning) built on Foundry Connected Agents and Toolboxes, with knowledge grounded in a
-  **Foundry IQ** knowledge base (agentic RAG over Azure AI Search). It
-  is a **drop-in** for the local A2A stub — same `airacare.report` → `CloudAssessment` and
-  `airacare.fetch_policy` → `EdgePolicyUpdate` contract; `cloud.mode: foundry` switches to
-  the real one. Demo state runs on a local store; production graduates to **Cosmos DB**
-  (live, via Managed Identity), with a **live care dashboard** over the filed events (Fabric/
-  OneLake + Power BI remain the stated production analytics target). The conversational
-  **hosted agent** (`foundry-hosted-agent/`) is deployed to **Azure AI Foundry Agent Service**
-  on `gpt-5.4`.
+- **Foundry Care Orchestrator** (`foundry-hosted-agent/`, this repo — see
+  [`foundry-hosted-agent/README.md`](foundry-hosted-agent/README.md)) — the cloud "brain",
+  **off the real-time safety path**, deployed as a **hosted agent** on **Azure AI Foundry Agent
+  Service** (`gpt-5.4`) and reachable over the **standard A2A protocol**. The edge speaks A2A
+  directly to it (`cloud.mode: foundry`); there is no bespoke A2A server. Determinism is
+  preserved by pre-model middleware: it computes the **considered level** and starts the
+  ack-tracked **escalation ladder** (never the advisory model), then a persistence middleware
+  writes the privacy-scrubbed `DailyLivingEvent` to **Cosmos DB** (live, via Managed Identity).
+  The model narrates a caregiver briefing grounded in a **Foundry IQ** knowledge base (agentic
+  RAG over Azure AI Search). A standalone **care dashboard** (`dashboard/`) reads the filed
+  events straight from Cosmos (Fabric/OneLake + Power BI remain the stated production analytics
+  target). For offline/CI, the edge runs against an **in-process stub** (`cloud.mode: stub`) — no
+  network, no Azure.
 
 ## Quick start
 
@@ -71,26 +73,36 @@ pytest -q -m "not slow"
 python -m airacare_edge.cli --scenario no-response --panel
 ```
 
-**Foundry orchestrator** (the cloud drop-in) — its **own** venv, since it's an independent
-deployable that will grow its own deps (Agent Framework, Foundry IQ / Azure AI Search, Cosmos). In a
-second terminal:
+**Foundry hosted agent** (the cloud brain) — deployed to **Azure AI Foundry Agent Service**, not
+run locally. Its deterministic middleware + Cosmos write are offline-testable in its **own** venv:
 
 ```powershell
-cd foundry-a2a-server
+cd foundry-hosted-agent
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest -q
-
-# start the A2A server the edge points at
-python -m airacare_foundry.a2a_server --port 8971
+# deploy/redeploy + A2A enablement: see foundry-hosted-agent/README.md and spec/foundry-a2a-hosting.md
 ```
 
-**End-to-end** — with the server running, point the edge (first terminal) at the real
-orchestrator instead of the in-process stub:
+**End-to-end (live)** — point the edge at the deployed Foundry A2A endpoint (Entra auth). The
+edge forwards each `DailyLivingEvent` over standard A2A; the hosted agent returns the
+deterministic considered assessment and writes the event to Cosmos:
 
 ```powershell
-python -m airacare_edge.cli --scenario no-response --cloud a2a --endpoint http://127.0.0.1:8971/a2a
+# edge/config.yaml -> cloud.mode: foundry, cloud.endpoint: <Foundry A2A endpoint>
+python -m airacare_edge.cli --scenario no-response --cloud foundry --panel
+```
+
+**Care dashboard** (reads the filed events from Cosmos) — its **own** venv:
+
+```powershell
+cd dashboard
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[cosmos]"
+python -m airacare_dashboard.server --config config.cosmos.yaml --port 8975   # open http://127.0.0.1:8975/
+# offline dry-run with seeded demo data (no Azure): python -m airacare_dashboard.server --seed
 ```
 
 For the full voice + LLM + offline demo, follow [`spec/demo-runbook.md`](spec/demo-runbook.md).

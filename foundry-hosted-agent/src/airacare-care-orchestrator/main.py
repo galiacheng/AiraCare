@@ -9,34 +9,36 @@ cognitive-trend, briefing — each wrapped as a tool, grounds care guidance in a
 ``search_care_guidelines`` tool, and can look up the patient's real filed events / state from
 Cosmos DB and save an advisory briefing back.
 
-Safety discipline (mirrors the design in
-``foundry-a2a-server/airacare_foundry/agents/agent_framework.py``): the model is **advisory only**. It never
-sets or second-guesses the risk level and never triggers alerts — the deterministic edge/cloud
-Python agents remain the sole authority for the considered level and for escalation. Any
-``considered_level`` read from the event store is authoritative and is restated verbatim. No
-diagnosis, no medication changes.
+Safety discipline: the model is **advisory only**. It never sets or second-guesses the risk
+level and never triggers alerts. The considered level and the ack-tracked escalation ladder are
+computed **deterministically** by the ported ``airacare_care`` domain (a pure pydantic/stdlib
+package the model can never front) in pre-model middleware. Any ``considered_level`` is
+authoritative and is restated verbatim. No diagnosis, no medication changes.
 
 Data access (least privilege, AAD only — no keys):
-- **Deterministic persistence (the safety-critical write).** The edge → local A2A server pipeline
-  forwards each privacy-scrubbed event to this hosted agent as a ``DAILY EVENT RECORD (JSON)`` block
-  embedded in the caregiver turn. ``DailyEventPersistenceMiddleware`` writes that record to the
-  ``daily_event`` container on **every** turn, BEFORE the model runs — so the Cosmos write is
-  deterministic and independent of anything the advisory-only LLM decides. The local A2A server
-  never touches Cosmos; this hosted agent owns persistence. The stored item is schema-compatible
-  with ``foundry-a2a-server``'s ``CosmosEventStore.append`` so the live care dashboard reads it.
-- Reads the **same** Cosmos containers the edge/A2A pipeline writes (``daily_event``,
-  ``patient_state``), surfacing only derived, privacy-scrubbed facts (event type, timestamp,
-  considered level, patient name/stage) — never raw audio/video/transcripts or the voice-biomarker
-  feature vector.
+- **Deterministic assessment + escalation (the safety-critical verdict).** The edge speaks
+  standard A2A to this hosted agent, forwarding each privacy-scrubbed event as a
+  ``DAILY EVENT RECORD (JSON)`` block in the caregiver turn. ``ConsideredAssessmentMiddleware``
+  runs BEFORE the model on **every** turn: it reads the patient's stored state, computes the
+  considered ``CloudAssessment`` with ``ConsideredAssessor``, starts the L3 escalation ladder, and
+  appends a delimited ``CONSIDERED ASSESSMENT (JSON)`` block to the response so the edge parses the
+  authoritative verdict back — independent of anything the advisory-only LLM decides.
+- **Deterministic persistence (the safety-critical write).** ``DailyEventPersistenceMiddleware``
+  writes the forwarded record to the ``daily_event`` container BEFORE the model runs, stamping the
+  deterministic considered level. This hosted agent owns persistence; the stored item is
+  schema-compatible with ``foundry-a2a-server``'s ``CosmosEventStore.append`` so the live care
+  dashboard reads it.
+- Reads the **same** Cosmos containers it writes (``daily_event``, ``patient_state``), surfacing
+  only derived, privacy-scrubbed facts (event type, timestamp, considered level, patient
+  name/stage) — never raw audio/video/transcripts or the voice-biomarker feature vector.
 - Also writes advisory ``care_briefing`` notes (agent-authored). It never mutates the authoritative
-  ``patient_state`` / ``edge_policy`` records, and never alters the forwarded event's considered
-  level.
-- If ``AIRACARE_COSMOS_ENDPOINT`` is unset, the data tools and the persistence middleware degrade
-  gracefully (the agent still runs as a stateless advisor), mirroring the store-optional design of
-  the main package.
+  ``patient_state`` records.
+- If ``AIRACARE_COSMOS_ENDPOINT`` is unset, the data tools and the middleware degrade gracefully
+  (the considered level still computes from the event + a safe default state; persistence is
+  skipped), so the agent still runs as a stateless advisor.
 
-This hosted agent is a NEW conversational surface, DISTINCT from the frozen edge A2A safety path
-(``airacare.report`` / ``airacare.fetch_policy``) and the ACA A2A server.
+This hosted agent is the single cloud brain: the deterministic care domain plus the advisory
+conversational surface, reached by the edge over standard A2A.
 
 Runtime contract (from the Foundry Agent-Framework Responses sample):
 - ``FoundryChatClient`` reaches the Foundry **project** endpoint (``FOUNDRY_PROJECT_ENDPOINT``)
@@ -52,11 +54,23 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
-from agent_framework import Agent, AgentContext, AgentMiddleware, tool
+from agent_framework import Agent, AgentContext, AgentMiddleware, Message, tool
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
+
+# Deterministic care domain (pure pydantic/stdlib — never fronted by the advisory model). This is
+# the safety-critical logic ported out of the standalone foundry-a2a-server when the edge moved to
+# speaking standard A2A directly to this hosted agent: the considered level and the ack-tracked
+# escalation ladder are computed by this Python in middleware, BEFORE the model runs.
+from airacare_care import (
+    ConsideredAssessor,
+    DailyLivingEvent,
+    EscalationAgent,
+    PatientState,
+    render_assessment_block,
+)
 
 # Load environment variables from a local .env when present (no-op in the container).
 load_dotenv()
@@ -274,11 +288,16 @@ def _extract_daily_event_record(text: str) -> tuple[dict[str, Any], str] | None:
     return record, text[brace:end]
 
 
-def _persist_daily_event(record: dict[str, Any], record_json: str) -> str | None:
+def _persist_daily_event(
+    record: dict[str, Any], record_json: str, considered_level: str | None = None
+) -> str | None:
     """Write the forwarded event to the daily_event container; return its id, or None on skip.
 
     Never raises: returns None when Cosmos is unconfigured or the record lacks the keys the store
-    (and dashboard) require. Provenance is stamped with ``source="a2a-forward"``.
+    (and dashboard) require. Provenance is stamped with ``source="a2a-forward"``. When
+    ``considered_level`` is supplied (the deterministic verdict computed by
+    :class:`ConsideredAssessmentMiddleware`), it is stored authoritatively; otherwise the level
+    carried in the record or the edge's own level is used.
     """
     db = _cosmos_db()
     if db is None:
@@ -296,7 +315,8 @@ def _persist_daily_event(record: dict[str, Any], record_json: str) -> str | None
             "patient_id": patient_id,
             "ts": ts,
             "type": event.get("type", "unknown"),
-            "considered_level": record.get("considered_level")
+            "considered_level": considered_level
+            or record.get("considered_level")
             or event.get("edge_assessed_level", "L0"),
             "record_json": record_json,
             "source": "a2a-forward",
@@ -305,13 +325,103 @@ def _persist_daily_event(record: dict[str, Any], record_json: str) -> str | None
     return item_id
 
 
+# --------------------------------------------------------------------------------------------
+# Deterministic considered assessment + escalation (the safety-critical verdict).
+#
+# In the standard-A2A topology the standalone foundry-a2a-server is retired, so THIS hosted agent
+# owns the considered level and the escalation ladder — and both must stay deterministic (never
+# decided by the advisory model). ConsideredAssessmentMiddleware runs BEFORE the model: it parses
+# the forwarded event, reads the patient's stored state from Cosmos, computes the considered
+# CloudAssessment with the ported ConsideredAssessor, starts the ack-tracked ladder for L3, and
+# stashes the verdict on context.metadata so the persistence middleware files the deterministic
+# level. After the model narrates, it appends a delimited CONSIDERED ASSESSMENT (JSON) block so the
+# edge parses the authoritative verdict back over A2A regardless of the model's wording.
+# --------------------------------------------------------------------------------------------
+
+_ASSESSMENT_META_KEY = "airacare_considered_assessment"
+
+# Module-level so escalation ladders (real threading.Timer windows) persist across turns.
+_ESCALATION_AGENT = EscalationAgent()
+
+
+def _read_patient_state(patient_id: str) -> PatientState | None:
+    """Read the patient's stored state from Cosmos; None when unconfigured, missing, or on error.
+
+    A miss (or no store) makes the assessor fall back to its safe default (moderate stage), so the
+    considered level is never blocked on state.
+    """
+    db = _cosmos_db()
+    if db is None:
+        return None
+    try:
+        from azure.cosmos import exceptions as cosmos_exc  # lazy
+
+        container = db.get_container_client(_PATIENT_STATE_CONTAINER)
+        try:
+            item = container.read_item(item=patient_id, partition_key=patient_id)
+        except cosmos_exc.CosmosResourceNotFoundError:
+            return None
+        return PatientState(
+            patient_id=patient_id,
+            name=item.get("name", ""),
+            disease_stage=item.get("disease_stage", "moderate"),
+            baseline_deviation=float(item.get("baseline_deviation", 0.0) or 0.0),
+        )
+    except Exception:  # noqa: BLE001 — state is best-effort; the assessor has a safe default
+        return None
+
+
+class ConsideredAssessmentMiddleware(AgentMiddleware):
+    """Compute the deterministic considered level + escalation on every turn (pre-model).
+
+    A caregiver turn that carries no DAILY EVENT RECORD (JSON) block (a plain conversational
+    question) is a no-op. All failures are swallowed so the advisory turn always proceeds.
+    """
+
+    async def process(
+        self, context: AgentContext, call_next: Callable[[], Awaitable[None]]
+    ) -> None:
+        assessment = None
+        try:
+            text = "\n".join(m.text for m in context.messages if getattr(m, "text", ""))
+            extracted = _extract_daily_event_record(text) if text else None
+            if extracted is not None:
+                record, _record_json = extracted
+                event = DailyLivingEvent.model_validate(record.get("event") or {})
+                state = _read_patient_state(event.patient_id)
+                assessment = ConsideredAssessor().assess(event, state)
+                context.metadata[_ASSESSMENT_META_KEY] = assessment
+                session = _ESCALATION_AGENT.handle(event, assessment)
+                note = f"; escalation started at {session.current_channel}" if session else ""
+                print(
+                    f"[considered] {event.patient_id} -> {assessment.considered_level}{note}",
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 — assessment must never break the advisory turn
+            print(f"[considered] skipped ({type(exc).__name__}: {exc})", flush=True)
+
+        await call_next()
+
+        # Append the deterministic verdict so the edge parses it back over A2A (the model's warm
+        # narration is advisory; this block is the authoritative considered level).
+        if assessment is not None:
+            try:
+                result = context.result
+                if result is not None and hasattr(result, "messages"):
+                    block = render_assessment_block(assessment)
+                    result.messages.append(Message(role="assistant", contents=[block]))
+            except Exception as exc:  # noqa: BLE001 — never break the turn over presentation
+                print(f"[considered] block append skipped ({type(exc).__name__}: {exc})", flush=True)
+
+
 class DailyEventPersistenceMiddleware(AgentMiddleware):
     """Deterministically persist the forwarded daily_event to Cosmos on every turn (pre-model).
 
     Runs before the advisory model so the safety-critical write happens regardless of what the LLM
     chooses to do. A caregiver turn that carries no DAILY EVENT RECORD (JSON) block (a plain
     conversational question) is a no-op. Persistence failures are swallowed so the advisory turn
-    always proceeds.
+    always proceeds. When :class:`ConsideredAssessmentMiddleware` ran first, its deterministic
+    considered level (on ``context.metadata``) is stored authoritatively.
     """
 
     async def process(
@@ -322,7 +432,9 @@ class DailyEventPersistenceMiddleware(AgentMiddleware):
             extracted = _extract_daily_event_record(text) if text else None
             if extracted is not None:
                 record, record_json = extracted
-                event_id = _persist_daily_event(record, record_json)
+                assessment = context.metadata.get(_ASSESSMENT_META_KEY)
+                considered = getattr(assessment, "considered_level", None)
+                event_id = _persist_daily_event(record, record_json, considered)
                 patient = (record.get("event") or {}).get("patient_id", "?")
                 if event_id:
                     print(f"[daily_event] persisted {event_id} for {patient}", flush=True)
@@ -559,9 +671,10 @@ def _build_orchestrator(client: FoundryChatClient) -> Agent:
         description="Compose an advisory caregiver briefing for a reported daily-living event.",
         instructions=_ORCHESTRATOR_INSTRUCTIONS,
         tools=tools,
-        # Deterministically file the forwarded daily_event to Cosmos before the (advisory) model
-        # runs — the safety-critical write is not left to the LLM's discretion.
-        middleware=[DailyEventPersistenceMiddleware()],
+        # Deterministic pre-model middleware, in order: (1) compute the considered level +
+        # escalation, then (2) file the forwarded daily_event to Cosmos with that deterministic
+        # level. Neither is left to the advisory LLM's discretion.
+        middleware=[ConsideredAssessmentMiddleware(), DailyEventPersistenceMiddleware()],
         # History is managed by the hosting infrastructure; the service need not store it.
         default_options={"store": False},
     )

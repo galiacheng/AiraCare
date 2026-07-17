@@ -31,9 +31,13 @@ voice:
 
 # Cloud target (async — the edge acts first, then reports here)
 cloud:
-  mode: stub                     # stub (local async assessment) | foundry (real Hosted Agent)
+  mode: stub                     # stub (in-process) | a2a (local stub server) | foundry (Hosted Agent)
   a2a_endpoint: "http://localhost:8971/a2a"
-  # For mode: foundry, point at the hosted agent and supply a bearer token WITHOUT baking the
-  # secret here — use an env reference (resolved at startup) or set AIRACARE_A2A_TOKEN in the env:
-  #   a2a_endpoint: "https://airacare-foundry.<region>.azurecontainerapps.io"
-  #   a2a_token: "${AIRACARE_A2A_TOKEN}"
+  # mode: foundry speaks standard A2A (message/send + task poll) straight to the Foundry hosted
+  # agent — no bespoke server in the path. Point a2a_endpoint at the agent's a2a protocol base URL
+  # and authenticate with an Entra token for the https://ai.azure.com resource (role: Foundry Agent
+  # Consumer+). NEVER bake the secret here — use an env reference or set AIRACARE_A2A_TOKEN; if
+  # neither is set the client falls back to azure-identity (DefaultAzureCredential), so `az login`
+  # works out of the box on a dev machine:
+  #   a2a_endpoint: "https://<account>.services.ai.azure.com/api/projects/<project>/agents/<agent>/endpoint/protocols/a2a"
+  #   a2a_token: "${AIRACARE_A2A_TOKEN}"   # e.g. az account get-access-token --resource https://ai.azure.com
