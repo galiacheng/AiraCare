@@ -1,8 +1,8 @@
 """Care Orchestrator — the cloud brain that turns a reported event into an assessment.
 
 The edge is authoritative: it grades and acts on its own, then *reports* the event. The
-orchestrator implements the same ``CloudGateway`` contract the edge expects
-(``report`` + ``fetch_policy``) and composes the two decision tiers:
+orchestrator implements the ``report`` half of the ``CloudGateway`` contract the edge expects
+and composes the two decision tiers:
 
 - **T1 — Considered assessment (synchronous):** :class:`AssessmentPolicy` loads patient
   state and returns a considered :class:`CloudAssessment` promptly. It is **off the edge's
@@ -11,11 +11,12 @@ orchestrator implements the same ``CloudGateway`` contract the edge expects
   deeper multi-agent reasoning, notifications, and escalation; it never blocks or changes
   the synchronous response.
 
-Policy piggyback: :meth:`report` stamps the patient's current ``policy_version`` (from the
-:class:`PolicyStore`) onto the assessment; when it exceeds the edge's version the edge lazily
-calls :meth:`fetch_policy` to pull the new :class:`EdgePolicyUpdate`. Policy is *written* by
-the deliberate tier's policy-learning agent, so a newly learned policy surfaces on the next
-report. This mirrors ``LocalCloudStub``.
+The server carries **no edge-policy control plane**: the edge already knows how to grade and
+escalate on its own, so the orchestrator neither learns nor serves policy. Every assessment
+piggybacks a constant ``policy_version`` (:data:`BASE_POLICY_VERSION`) equal to the edge's own
+baseline, so the edge is always current and never calls ``fetch_policy``. The
+``CloudAssessment.policy_version`` field is retained purely for wire-compatibility with the
+frozen edge contract.
 """
 
 from __future__ import annotations
@@ -32,19 +33,16 @@ from airacare_foundry.agents.knowledge import (
     KnowledgeBase,
     LocalKnowledgeBase,
 )
-from airacare_foundry.agents.policy_learning import PolicyLearningAgent
 from airacare_foundry.assess.assessor import ConsideredAssessor
 from airacare_foundry.assess.policy import AssessmentPolicy
 from airacare_foundry.config import FoundryConfig
-from airacare_foundry.contracts import CloudAssessment, DailyLivingEvent, EdgePolicyUpdate
+from airacare_foundry.contracts import CloudAssessment, DailyLivingEvent
 from airacare_foundry.store.base import (
     EventStore,
     PatientState,
     PatientStateStore,
-    PolicyStore,
-    policy_version_for,
 )
-from airacare_foundry.store.local import LocalEventStore, LocalPolicyStore, seeded_local_store
+from airacare_foundry.store.local import LocalEventStore, seeded_local_store
 
 
 def _build_executor(kind: str):
@@ -76,7 +74,7 @@ def _build_narrator(config: FoundryConfig):
        a separately deployed agent over the OpenAI Responses protocol (grounded in Foundry IQ). This
        takes **precedence** and works with the async executors (``agents``/``thread``).
     2. **In-process MAF workflow** (``foundry_endpoint`` + ``foundry_deployment`` set, ``executor:
-       agents``) — binds the six Connected Agents to a shared model here in the process.
+       agents``) — binds the five Connected Agents to a shared model here in the process.
 
     Any other configuration returns None — the deliberate tier then stays fully deterministic
     (local/CI default), preserving parity.
@@ -126,8 +124,9 @@ def _build_narrator(config: FoundryConfig):
 class CareOrchestrator:
     """Considered-assessment-first cloud gateway with an asynchronous deliberate tier.
 
-    Implements the edge's ``CloudGateway`` protocol: ``report`` (T1 assessment) and
-    ``fetch_policy`` (lazy control-plane update served from the :class:`PolicyStore`).
+    Implements the ``report`` half of the edge's ``CloudGateway`` protocol (T1 assessment).
+    The server holds no edge-policy control plane; every assessment carries a constant
+    ``policy_version`` so the edge is always current and never calls ``fetch_policy``.
     """
 
     def __init__(
@@ -136,17 +135,10 @@ class CareOrchestrator:
         *,
         assessor: ConsideredAssessor | None = None,
         deliberate: DeliberateTier | None = None,
-        policy: EdgePolicyUpdate | None = None,
-        policy_version: int = 1,  # retained for compat; store-derived version takes precedence
-        policy_store: PolicyStore | None = None,
         event_store: EventStore | None = None,
     ) -> None:
         self._store = store
-        self._policy_store: PolicyStore = policy_store or LocalPolicyStore(":memory:")
         self._event_store: EventStore = event_store or LocalEventStore(":memory:")
-        # Backward-compat: a policy passed directly seeds the store (e.g. tests/demo).
-        if policy is not None:
-            self._policy_store.upsert(policy)
         self._policy = AssessmentPolicy(store, assessor)
         self._deliberate = deliberate or DeliberateTier(enabled=False)
         self._trend = CognitiveTrendAgent(self._event_store)
@@ -155,18 +147,10 @@ class CareOrchestrator:
     def report(self, event: DailyLivingEvent) -> CloudAssessment | None:
         """T1 considered assessment; schedules deliberate reasoning fire-and-forget."""
         state = self._policy.resolve_state(event)
-        version = policy_version_for(self._policy_store, event.patient_id)
-        assessment = self._policy.assess(event, policy_version=version)
+        assessment = self._policy.assess(event)
         # Enhancement tier — must never delay or alter the T1 response above.
         self._deliberate.schedule(event, state, assessment)
         return assessment
-
-    def fetch_policy(self, patient_id: str, since_version: int) -> EdgePolicyUpdate | None:
-        """Return the patient's stored policy when the edge is behind, else None."""
-        policy = self._policy_store.get(patient_id)
-        if policy is not None and policy.version > since_version:
-            return policy
-        return None
 
     def drain(self) -> None:
         """Await any in-flight deliberate (T2) jobs — used by the server for graceful shutdown."""
@@ -189,8 +173,7 @@ class CareOrchestrator:
     @classmethod
     def from_config(cls, config: FoundryConfig) -> "CareOrchestrator":
         """Build an orchestrator from config, selecting the local or Cosmos store backend."""
-        store, policy_store, event_store = _build_stores(config)
-        learning = PolicyLearningAgent(policy_store, enabled=config.deliberate.enabled)
+        store, event_store = _build_stores(config)
         escalation = EscalationAgent(contacts=config.contacts, enabled=config.deliberate.enabled)
         kb: KnowledgeBase = (
             AzureSearchKnowledgeBase() if config.knowledge.backend == "azure"
@@ -199,20 +182,19 @@ class CareOrchestrator:
         knowledge = KnowledgeAgent(kb, enabled=config.deliberate.enabled)
         deliberate = DeliberateTier(
             enabled=config.deliberate.enabled,
-            policy_learning=learning,
             escalation=escalation,
             knowledge=knowledge,
             event_store=event_store,
             executor=_build_executor(config.deliberate.executor),
             narrator=_build_narrator(config),
         )
-        return cls(store, deliberate=deliberate, policy_store=policy_store, event_store=event_store)
+        return cls(store, deliberate=deliberate, event_store=event_store)
 
 
 def _build_stores(
     config: FoundryConfig,
-) -> tuple[PatientStateStore, PolicyStore, EventStore]:
-    """Construct the (state, policy, event) store trio for the configured backend.
+) -> tuple[PatientStateStore, EventStore]:
+    """Construct the (state, event) store pair for the configured backend.
 
     ``local`` uses the seeded SQLite stores (demo/MVP). ``cosmos`` builds the production
     Azure Cosmos DB stores (partition = ``/patient_id``); it requires ``cosmos_endpoint`` /
@@ -232,7 +214,6 @@ def _build_stores(
         from airacare_foundry.store.cosmos import (
             CosmosEventStore,
             CosmosPatientStateStore,
-            CosmosPolicyStore,
         )
 
         kwargs = {
@@ -251,13 +232,10 @@ def _build_stores(
                     disease_stage=config.patient.disease_stage,
                 )
             )
-        policy_store: PolicyStore = CosmosPolicyStore(
-            endpoint, credential or "", **kwargs
-        )
         event_store: EventStore = CosmosEventStore(
             endpoint, credential or "", **kwargs
         )
-        return state_store, policy_store, event_store
+        return state_store, event_store
 
     local_state = seeded_local_store(
         sc.sqlite_path,
@@ -265,7 +243,7 @@ def _build_stores(
         name=config.patient.name,
         disease_stage=config.patient.disease_stage,
     )
-    return local_state, LocalPolicyStore(sc.sqlite_path), LocalEventStore(sc.sqlite_path)
+    return local_state, LocalEventStore(sc.sqlite_path)
 
 
 def _default_store() -> PatientStateStore:

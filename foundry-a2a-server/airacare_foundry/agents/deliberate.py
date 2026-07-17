@@ -12,9 +12,8 @@ Execution is pluggable via a :class:`DeliberateExecutor`:
 - :class:`ThreadExecutor` runs jobs on a background worker so ``report`` returns immediately;
   ``join()`` drains it for tests.
 
-Wired agents so far: :class:`~airacare_foundry.agents.policy_learning.PolicyLearningAgent`
-(distills versioned edge policy), :class:`~airacare_foundry.agents.escalation.EscalationAgent`
-(the ack-tracked family → community → emergency ladder for L3), and
+Wired agents so far: :class:`~airacare_foundry.agents.escalation.EscalationAgent`
+(the ack-tracked family → community → emergency ladder for L3) and
 :class:`~airacare_foundry.agents.knowledge.KnowledgeAgent` (grounds advice in care-guideline
 RAG). Each scheduled event is also **filed** to the :class:`~airacare_foundry.store.base.EventStore`
 so the batch Cognitive-Trend and Briefing agents (and the Power BI export) have history to read.
@@ -29,7 +28,6 @@ from typing import Callable, Protocol, runtime_checkable
 
 from airacare_foundry.agents.escalation import EscalationAgent
 from airacare_foundry.agents.knowledge import GroundedAdvice, KnowledgeAgent
-from airacare_foundry.agents.policy_learning import PolicyLearningAgent
 from airacare_foundry.contracts import CloudAssessment, DailyLivingEvent
 from airacare_foundry.store.base import EventStore, PatientState, RecordedEvent
 
@@ -100,7 +98,6 @@ class DeliberateTier:
         self,
         *,
         enabled: bool = False,
-        policy_learning: PolicyLearningAgent | None = None,
         escalation: EscalationAgent | None = None,
         knowledge: KnowledgeAgent | None = None,
         event_store: EventStore | None = None,
@@ -111,7 +108,6 @@ class DeliberateTier:
         | None = None,
     ) -> None:
         self.enabled = enabled
-        self._policy_learning = policy_learning
         self._escalation = escalation
         self._knowledge = knowledge
         self._event_store = event_store
@@ -146,8 +142,6 @@ class DeliberateTier:
         if self._event_store is not None:
             level = assessment.considered_level if assessment is not None else event.edge_assessed_level
             self._event_store.append(RecordedEvent(event=event, considered_level=level))
-        if self._policy_learning is not None:
-            self._policy_learning.observe(event, state)
         if self._knowledge is not None:
             advice = self._knowledge.advise(event, assessment)
             if advice is not None:

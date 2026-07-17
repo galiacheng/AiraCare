@@ -3,13 +3,13 @@
 
 This is the cloud **care-orchestrator** graduated onto the Microsoft Agent Framework and hosted by
 Azure AI Foundry Agent Service. A caregiver or clinician converses with it (Responses API); the
-orchestrator consults six connected specialists — risk-reasoning, knowledge, escalation,
-cognitive-trend, briefing, policy-learning — each wrapped as a tool, grounds care guidance in a
+orchestrator consults five connected specialists — risk-reasoning, knowledge, escalation,
+cognitive-trend, briefing — each wrapped as a tool, grounds care guidance in a
 **Foundry IQ** knowledge base (agentic retrieval over Azure AI Search) via the
 ``search_care_guidelines`` tool, and can look up the patient's real filed events / state from
 Cosmos DB and save an advisory briefing back.
 
-Safety discipline (mirrors the FH6 design in
+Safety discipline (mirrors the design in
 ``foundry-a2a-server/airacare_foundry/agents/agent_framework.py``): the model is **advisory only**. It never
 sets or second-guesses the risk level and never triggers alerts — the deterministic edge/cloud
 Python agents remain the sole authority for the considered level and for escalation. Any
@@ -17,14 +17,23 @@ Python agents remain the sole authority for the considered level and for escalat
 diagnosis, no medication changes.
 
 Data access (least privilege, AAD only — no keys):
+- **Deterministic persistence (the safety-critical write).** The edge → local A2A server pipeline
+  forwards each privacy-scrubbed event to this hosted agent as a ``DAILY EVENT RECORD (JSON)`` block
+  embedded in the caregiver turn. ``DailyEventPersistenceMiddleware`` writes that record to the
+  ``daily_event`` container on **every** turn, BEFORE the model runs — so the Cosmos write is
+  deterministic and independent of anything the advisory-only LLM decides. The local A2A server
+  never touches Cosmos; this hosted agent owns persistence. The stored item is schema-compatible
+  with ``foundry-a2a-server``'s ``CosmosEventStore.append`` so the live care dashboard reads it.
 - Reads the **same** Cosmos containers the edge/A2A pipeline writes (``daily_event``,
   ``patient_state``), surfacing only derived, privacy-scrubbed facts (event type, timestamp,
   considered level, patient name/stage) — never raw audio/video/transcripts or the voice-biomarker
   feature vector.
-- Writes ONLY to a dedicated ``care_briefing`` container (agent-authored notes). It never mutates
-  the authoritative ``daily_event`` / ``patient_state`` / ``edge_policy`` records.
-- If ``AIRACARE_COSMOS_ENDPOINT`` is unset, the data tools degrade gracefully (the agent still runs
-  as a stateless advisor), mirroring the store-optional design of the main package.
+- Also writes advisory ``care_briefing`` notes (agent-authored). It never mutates the authoritative
+  ``patient_state`` / ``edge_policy`` records, and never alters the forwarded event's considered
+  level.
+- If ``AIRACARE_COSMOS_ENDPOINT`` is unset, the data tools and the persistence middleware degrade
+  gracefully (the agent still runs as a stateless advisor), mirroring the store-optional design of
+  the main package.
 
 This hosted agent is a NEW conversational surface, DISTINCT from the frozen edge A2A safety path
 (``airacare.report`` / ``airacare.fetch_policy``) and the ACA A2A server.
@@ -39,10 +48,11 @@ Runtime contract (from the Foundry Agent-Framework Responses sample):
 import json
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
-from agent_framework import Agent, tool
+from agent_framework import Agent, AgentContext, AgentMiddleware, tool
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.identity import DefaultAzureCredential
@@ -53,7 +63,7 @@ load_dotenv()
 
 
 # --------------------------------------------------------------------------------------------
-# The six DELIBERATE-tier Connected Agents, as (name, role, instructions) descriptors. Ordering
+# The five DELIBERATE-tier Connected Agents, as (name, role, instructions) descriptors. Ordering
 # and wording mirror connected_agent_specs() in the main package so the hosted brain matches the
 # offline one. Each is exposed to the orchestrator as a tool.
 # --------------------------------------------------------------------------------------------
@@ -108,16 +118,6 @@ _SPECIALISTS: list[dict[str, str]] = [
             "for. Warm and clear for family; factual and structured for clinicians."
         ),
     },
-    {
-        "name": "policy_learning",
-        "role": "Suggest personalised edge-policy tuning from recurring patterns.",
-        "instructions": (
-            "On recurring patterns (e.g. repeated nighttime wandering), suggest — as advice only — "
-            "how the edge policy might be personalised (e.g. a gentler reassurance prompt). Frame "
-            "it as a recommendation for a caregiver/clinician to approve. Never claim to change "
-            "the live policy or the current risk level."
-        ),
-    },
 ]
 
 
@@ -140,11 +140,14 @@ _ORCHESTRATOR_INSTRUCTIONS = (
     "call fetch_recent_events and fetch_patient_state to ground your answer in their real filed "
     "history, and log_care_briefing to save a short advisory recap for the record. Saving a "
     "briefing is just a note — it never changes the patient's care, risk level, or escalation. "
+    "When a report includes a DAILY EVENT RECORD (JSON), that event has ALREADY been filed to the "
+    "care record automatically before you saw it — you do not need to save it, and the considered "
+    "level in it is authoritative. "
     "Before giving any care guidance, call search_care_guidelines (or delegate to the knowledge "
     "specialist, which uses it) so the advice is grounded in the dementia-care guideline knowledge "
     "base and cite the source guideline names it returns.\n\n"
     "Consult the specialist tools (risk_reasoning, knowledge, escalation, cognitive_trend, "
-    "briefing, policy_learning) as helpful for the caregiver's question, passing along the relevant "
+    "briefing) as helpful for the caregiver's question, passing along the relevant "
     "situation. Then reply with a short, warm, plain-language message: acknowledge what happened, "
     "restate the considered level and why it stands (when one is given), note what has already been "
     "done, and offer one gentle, practical next step. Do not include internal tool chatter."
@@ -231,6 +234,104 @@ def _cosmos_db() -> Any:
             client = CosmosClient(_COSMOS_ENDPOINT, _credential())
         _COSMOS_DB = client.get_database_client(_COSMOS_DATABASE)
     return _COSMOS_DB
+
+
+# --------------------------------------------------------------------------------------------
+# Deterministic daily-event persistence (the safety-critical Cosmos write).
+#
+# The edge → local A2A server pipeline forwards each privacy-scrubbed event to this hosted agent as
+# a "DAILY EVENT RECORD (JSON)" block embedded in the caregiver turn. We persist that record to the
+# daily_event container in AGENT MIDDLEWARE that runs on every turn BEFORE the model — so the write
+# is deterministic and independent of anything the (advisory-only) LLM decides to do. The local A2A
+# server never connects to Cosmos; this hosted agent owns persistence.
+#
+# The stored item is schema-compatible with foundry-a2a-server's CosmosEventStore.append(): the live
+# care dashboard deserialises `record_json` into a RecordedEvent, so these rows render unchanged.
+# --------------------------------------------------------------------------------------------
+
+_DAILY_EVENT_MARKER = "DAILY EVENT RECORD (JSON)"
+
+
+def _extract_daily_event_record(text: str) -> tuple[dict[str, Any], str] | None:
+    """Return (parsed_record, record_json_substring) forwarded in a caregiver turn, or None.
+
+    Locates the DAILY EVENT RECORD (JSON) marker and decodes the JSON object that immediately
+    follows it, returning both the parsed dict and the exact JSON substring (stored verbatim as
+    ``record_json`` so it round-trips through RecordedEvent.model_validate_json).
+    """
+    marker = text.find(_DAILY_EVENT_MARKER)
+    if marker == -1:
+        return None
+    brace = text.find("{", marker)
+    if brace == -1:
+        return None
+    try:
+        record, end = json.JSONDecoder().raw_decode(text, brace)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(record, dict) or "event" not in record:
+        return None
+    return record, text[brace:end]
+
+
+def _persist_daily_event(record: dict[str, Any], record_json: str) -> str | None:
+    """Write the forwarded event to the daily_event container; return its id, or None on skip.
+
+    Never raises: returns None when Cosmos is unconfigured or the record lacks the keys the store
+    (and dashboard) require. Provenance is stamped with ``source="a2a-forward"``.
+    """
+    db = _cosmos_db()
+    if db is None:
+        return None
+    event = record.get("event") or {}
+    patient_id = event.get("patient_id")
+    ts = event.get("timestamp")
+    if not patient_id or not ts:
+        return None
+    item_id = str(uuid.uuid4())
+    container = db.get_container_client(_DAILY_EVENT_CONTAINER)
+    container.create_item(
+        {
+            "id": item_id,
+            "patient_id": patient_id,
+            "ts": ts,
+            "type": event.get("type", "unknown"),
+            "considered_level": record.get("considered_level")
+            or event.get("edge_assessed_level", "L0"),
+            "record_json": record_json,
+            "source": "a2a-forward",
+        }
+    )
+    return item_id
+
+
+class DailyEventPersistenceMiddleware(AgentMiddleware):
+    """Deterministically persist the forwarded daily_event to Cosmos on every turn (pre-model).
+
+    Runs before the advisory model so the safety-critical write happens regardless of what the LLM
+    chooses to do. A caregiver turn that carries no DAILY EVENT RECORD (JSON) block (a plain
+    conversational question) is a no-op. Persistence failures are swallowed so the advisory turn
+    always proceeds.
+    """
+
+    async def process(
+        self, context: AgentContext, call_next: Callable[[], Awaitable[None]]
+    ) -> None:
+        try:
+            text = "\n".join(m.text for m in context.messages if getattr(m, "text", ""))
+            extracted = _extract_daily_event_record(text) if text else None
+            if extracted is not None:
+                record, record_json = extracted
+                event_id = _persist_daily_event(record, record_json)
+                patient = (record.get("event") or {}).get("patient_id", "?")
+                if event_id:
+                    print(f"[daily_event] persisted {event_id} for {patient}", flush=True)
+                else:
+                    print("[daily_event] not persisted (store unconfigured or incomplete record)",
+                          flush=True)
+        except Exception as exc:  # noqa: BLE001 — persistence must never break the advisory turn
+            print(f"[daily_event] persist skipped ({type(exc).__name__}: {exc})", flush=True)
+        await call_next()
 
 
 @tool(
@@ -420,7 +521,7 @@ def search_care_guidelines(
 
 
 def _build_orchestrator(client: FoundryChatClient) -> Agent:
-    """Build the care-orchestrator agent with the six specialists and the data tools."""
+    """Build the care-orchestrator agent with the five specialists and the data tools."""
     tools: list[Any] = []
     for spec in _SPECIALISTS:
         # The knowledge specialist gets the retrieval tool so its advice is grounded + cited.
@@ -458,6 +559,9 @@ def _build_orchestrator(client: FoundryChatClient) -> Agent:
         description="Compose an advisory caregiver briefing for a reported daily-living event.",
         instructions=_ORCHESTRATOR_INSTRUCTIONS,
         tools=tools,
+        # Deterministically file the forwarded daily_event to Cosmos before the (advisory) model
+        # runs — the safety-critical write is not left to the LLM's discretion.
+        middleware=[DailyEventPersistenceMiddleware()],
         # History is managed by the hosting infrastructure; the service need not store it.
         default_options={"store": False},
     )

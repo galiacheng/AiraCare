@@ -29,7 +29,7 @@ services:
             resources:
                 cpu: "0.5"
                 memory: 1Gi
-        description: 'AiraCare''s advisory cloud care-orchestrator: composes warm, plain-language caregiver briefings for in-home Alzheimer''s care by consulting six connected specialists (risk-reasoning, knowledge, escalation, cognitive-trend, briefing, policy-learning). Advisory only — it never sets the risk level or drives escalation.'
+        description: 'AiraCare''s advisory cloud care-orchestrator: composes warm, plain-language caregiver briefings for in-home Alzheimer''s care by consulting five connected specialists (risk-reasoning, knowledge, escalation, cognitive-trend, briefing). Advisory only — it never sets the risk level or drives escalation, and it deterministically files each forwarded daily event to the care record.'
         environmentVariables:
             - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
               value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}

@@ -1,8 +1,8 @@
-"""Store contracts — patient state (read by T1) and edge policy (control-plane feedback).
+"""Store contracts — patient state (read by T1) and the filed-event log (read by analytics).
 
 Decision #6 = C: this scaffold uses **local** stores (see ``local.py``). The
-:class:`PatientStateStore` and :class:`PolicyStore` protocols keep the assessment policy and
-the policy-learning seam decoupled from the backend so a Cosmos DB / Fabric implementation
+:class:`PatientStateStore` and :class:`EventStore` protocols keep the assessment tier and the
+batch trend/briefing agents decoupled from the backend so a Cosmos DB / Fabric implementation
 (``cosmos.py``) can drop in later behind the same interfaces with no caller changes.
 """
 
@@ -13,12 +13,14 @@ from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-from airacare_foundry.contracts import DailyLivingEvent, EdgePolicyUpdate, Grade, utcnow
+from airacare_foundry.contracts import DailyLivingEvent, Grade, utcnow
 
 DiseaseStage = Literal["mild", "moderate", "severe"]
 
-# The edge boots at policy version 1 (its own config baseline). A patient with no learned
-# policy therefore piggybacks version 1, so the edge is already current and never fetches.
+# The edge boots at policy version 1 (its own config baseline). The server no longer learns or
+# serves edge policy; it simply piggybacks this constant version on every assessment so the edge
+# is already current and never calls ``fetch_policy``. The frozen A2A contract keeps the
+# ``policy_version`` field for wire-compatibility with the edge.
 BASE_POLICY_VERSION = 1
 
 
@@ -46,31 +48,6 @@ class PatientStateStore(Protocol):
     def upsert(self, state: PatientState) -> None:
         """Insert or replace the state for ``state.patient_id``."""
         ...
-
-
-@runtime_checkable
-class PolicyStore(Protocol):
-    """Versioned per-patient :class:`EdgePolicyUpdate` — the control-plane feedback channel.
-
-    The cloud's learning is distilled into a policy and stored here; the orchestrator
-    piggybacks its ``version`` onto every :class:`CloudAssessment` and serves the full policy
-    via ``fetch_policy`` when the edge is behind. Only the latest policy per patient is kept
-    (MVP); a production backend may retain history.
-    """
-
-    def get(self, patient_id: str) -> EdgePolicyUpdate | None:
-        """Return the latest stored policy for a patient, or ``None`` if none learned yet."""
-        ...
-
-    def upsert(self, policy: EdgePolicyUpdate) -> None:
-        """Insert or replace the latest policy for ``policy.patient_id``."""
-        ...
-
-
-def policy_version_for(store: PolicyStore, patient_id: str) -> int:
-    """The version to piggyback for a patient: the learned policy's, or the base version."""
-    policy = store.get(patient_id)
-    return policy.version if policy is not None else BASE_POLICY_VERSION
 
 
 class RecordedEvent(BaseModel):

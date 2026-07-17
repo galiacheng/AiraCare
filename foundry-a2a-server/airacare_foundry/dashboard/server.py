@@ -100,7 +100,7 @@ def build_data(config, *, seed: bool, days: int) -> DashboardData:
     """Build :class:`DashboardData` from a loaded config, optionally seeding demo events."""
     from airacare_foundry.orchestrator import _build_stores
 
-    state_store, _policy_store, event_store = _build_stores(config)
+    state_store, event_store = _build_stores(config)
     if seed:
         from airacare_foundry.tools.demo_seed import seed_event_store
 

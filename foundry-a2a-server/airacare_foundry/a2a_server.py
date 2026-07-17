@@ -7,7 +7,9 @@ A stdlib HTTP server that speaks the exact JSON-RPC 2.0 / A2A envelope the edge'
 in-process stub:
 
 - ``airacare.report``       params ``{event}``                     -> ``CloudAssessment | null``
-- ``airacare.fetch_policy`` params ``{patient_id, since_version}`` -> ``EdgePolicyUpdate | null``
+
+The server carries **no edge-policy control plane** — the edge grades and escalates on its own,
+so ``airacare.fetch_policy`` is no longer served (an edge that asks gets a graceful ``null``).
 
 Run standalone:
 
@@ -28,7 +30,6 @@ from airacare_foundry.orchestrator import CareOrchestrator, default_orchestrator
 
 # Must match edge/airacare_foundry/cloud/a2a_client.py
 REPORT_METHOD = "airacare.report"
-FETCH_POLICY_METHOD = "airacare.fetch_policy"
 
 # Env var holding the optional bearer token. When set, POST requests must carry
 # ``Authorization: Bearer <token>``; when unset, the endpoint is open (local/demo).
@@ -64,11 +65,6 @@ def _make_handler(
                     event = DailyLivingEvent.model_validate(params["event"])
                     assessment = orchestrator.report(event)
                     result = json.loads(assessment.model_dump_json()) if assessment else None
-                elif method == FETCH_POLICY_METHOD:
-                    update = orchestrator.fetch_policy(
-                        params["patient_id"], params["since_version"]
-                    )
-                    result = json.loads(update.model_dump_json()) if update else None
                 else:
                     raise ValueError(f"unknown method: {method}")
                 self._send(200, {"jsonrpc": "2.0", "id": rpc_id, "result": result})

@@ -20,7 +20,7 @@ edge/cloud Python agents remain the sole authority. See the safety framing in
 foundry-hosted-agent/
 ├─ azure.yaml                         # azd + microsoft.foundry: model deployment + hosted agent
 └─ src/airacare-care-orchestrator/
-   ├─ main.py                         # orchestrator + six specialists (as tools) via FoundryChatClient
+   ├─ main.py                         # orchestrator + five specialists (as tools) via FoundryChatClient
    ├─ requirements.txt                # agent-framework-foundry(+hosting), python-dotenv, debugpy
    ├─ Dockerfile                      # python:3.12-slim, EXPOSE 8088, CMD python main.py
    ├─ .env.example                    # FOUNDRY_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME

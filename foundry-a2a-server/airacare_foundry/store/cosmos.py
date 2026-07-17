@@ -1,17 +1,17 @@
 """Cosmos DB stores — the production graduation seam (Decision #6: local → Cosmos is a *swap*).
 
 The MVP runs on the local SQLite stores (``local.py``). This module implements the **same**
-:class:`PatientStateStore`, :class:`PolicyStore`, and :class:`EventStore` protocols against
+:class:`PatientStateStore` and :class:`EventStore` protocols against
 **Azure Cosmos DB** so graduating to production is a config flip (``store.backend: cosmos``),
-not a rewrite. Everything upstream — the assessment policy, policy-learning, batch trend /
-briefing agents, and the orchestrator — is untouched.
+not a rewrite. Everything upstream — the assessment tier, batch trend / briefing agents, and
+the orchestrator — is untouched.
 
 Design (matches ``spec/foundry-design.md`` §7):
 
 - **Partition key = ``/patient_id``** for every container → single-digit-ms point reads that
   keep the report response prompt, and per-patient event queries that stay in one partition.
-- Three containers: ``patient_state`` and ``edge_policy`` (id = ``patient_id``, one item per
-  patient) and ``daily_event`` (append-only, id = a per-event uuid).
+- Two containers: ``patient_state`` (id = ``patient_id``, one item per patient) and
+  ``daily_event`` (append-only, id = a per-event uuid).
 - Analytics never runs here: the events container is **mirrored to Microsoft Fabric / OneLake**
   (zero-copy, no ETL) where Cognitive-Trend batch modeling and Power BI live. See
   ``docs/production.md``.
@@ -30,7 +30,6 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from airacare_foundry.contracts import EdgePolicyUpdate
 from airacare_foundry.store.base import PatientState, RecordedEvent
 
 if TYPE_CHECKING:  # only for type hints; never imported at runtime unless the extra is installed
@@ -43,7 +42,6 @@ _MISSING_SDK = (
 
 # Default container names (overridable via config). Partition key path is /patient_id for all.
 PATIENT_STATE_CONTAINER = "patient_state"
-EDGE_POLICY_CONTAINER = "edge_policy"
 DAILY_EVENT_CONTAINER = "daily_event"
 PARTITION_KEY_PATH = "/patient_id"
 
@@ -135,43 +133,6 @@ class CosmosPatientStateStore(_CosmosBase):
         self._container.upsert_item(body)
 
 
-class CosmosPolicyStore(_CosmosBase):
-    """:class:`PolicyStore` backed by Cosmos DB (latest versioned policy per patient)."""
-
-    def __init__(
-        self,
-        endpoint: str,
-        credential: str,
-        *,
-        database: str = "airacare",
-        container: str = EDGE_POLICY_CONTAINER,
-        auth: str = "key",
-        tls_verify: bool = True,
-    ) -> None:
-        super().__init__(
-            endpoint, credential, database=database, container=container,
-            auth=auth, tls_verify=tls_verify,
-        )
-
-    def get(self, patient_id: str) -> EdgePolicyUpdate | None:
-        _, exc = _import_cosmos()
-        try:
-            item = self._container.read_item(item=patient_id, partition_key=patient_id)
-        except exc.CosmosResourceNotFoundError:
-            return None
-        return EdgePolicyUpdate.model_validate_json(item["policy_json"])
-
-    def upsert(self, policy: EdgePolicyUpdate) -> None:
-        self._container.upsert_item(
-            {
-                "id": policy.patient_id,
-                "patient_id": policy.patient_id,
-                "version": policy.version,
-                "policy_json": policy.model_dump_json(),
-            }
-        )
-
-
 class CosmosEventStore(_CosmosBase):
     """:class:`EventStore` backed by Cosmos DB (append-only; mirrored to Fabric/OneLake)."""
 
@@ -228,10 +189,8 @@ class CosmosEventStore(_CosmosBase):
 
 __all__ = [
     "CosmosPatientStateStore",
-    "CosmosPolicyStore",
     "CosmosEventStore",
     "PATIENT_STATE_CONTAINER",
-    "EDGE_POLICY_CONTAINER",
     "DAILY_EVENT_CONTAINER",
     "PARTITION_KEY_PATH",
 ]

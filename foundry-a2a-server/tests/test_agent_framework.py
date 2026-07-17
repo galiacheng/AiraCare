@@ -57,7 +57,6 @@ def test_connected_agent_specs_topology() -> None:
         "escalation",
         "cognitive-trend",
         "briefing",
-        "policy-learning",
     ]
     for spec in specs:
         assert isinstance(spec, AgentSpec)
@@ -190,13 +189,25 @@ def test_case_file_carries_fixed_facts() -> None:
     assert "time_of_day" in text
 
 
-def test_case_file_never_leaks_raw_features() -> None:
+def test_case_file_prose_never_leaks_raw_features() -> None:
     ev = _event(features=[0.987654, 0.123456])
     text = case_file(ev, CloudAssessment(considered_level="L1", reason="ok"))
-    # Only the COUNT of voice-biomarker features may appear — never the raw values.
-    assert "features present: 2" in text
+    # The human-readable prose (everything before the machine record block) may show only the
+    # COUNT of voice-biomarker features — never the raw values.
+    prose, _, record = text.partition("DAILY EVENT RECORD (JSON)")
+    assert "features present: 2" in prose
+    assert "0.987654" not in prose
+    assert "0.123456" not in prose
+    # The authoritative machine record the hosted agent persists DOES carry the derived features
+    # (they already crossed the A2A wire and power the cloud cognitive-trajectory chart).
+    assert record and "0.987654" in record
+
+
+def test_case_file_without_record_is_prose_only() -> None:
+    ev = _event(features=[0.987654])
+    text = case_file(ev, CloudAssessment(considered_level="L1", reason="ok"), include_record=False)
+    assert "DAILY EVENT RECORD" not in text
     assert "0.987654" not in text
-    assert "0.123456" not in text
 
 
 def test_case_file_falls_back_to_edge_level_without_assessment() -> None:

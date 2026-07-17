@@ -12,18 +12,18 @@ Design intent (see foundry-design.md §5):
   returns immediately and ``join`` drains in-flight work. The wired Python agents
   (Policy-Learning, Escalation, Knowledge, event filing) run **unchanged**; no model call is made.
 
-- The adapter scaffolding (:func:`connected_agent_specs`, :func:`tool_specs`) declares how the six
+- The adapter scaffolding (:func:`connected_agent_specs`, :func:`tool_specs`) declares how the five
   Connected Agents and the Notify / Geofence / EscalationTimer tools map onto MAF agents/skills.
   These are pure descriptors (no MAF import, no model) so the offline demo/tests can introspect
   the planned topology. :func:`build_workflow` (**FH6**) now binds them to a **live** Foundry model
   deployment: it builds a MAF orchestrator agent on ``gpt-5.4`` (Azure OpenAI Responses API, AAD)
-  that delegates to the six Connected Agents wrapped as tools, and returns a :class:`CareWorkflow`
+  that delegates to the five Connected Agents wrapped as tools, and returns a :class:`CareWorkflow`
   whose :meth:`~CareWorkflow.narrate` composes an **advisory caregiver narrative** from a scrubbed
   :func:`case_file`.
 
 Safety discipline (the model is advisory-only): the narrative is produced *after* — and never
 alters — the deterministic T1 :class:`~airacare_foundry.contracts.CloudAssessment`. The Python
-agents (``ConsideredAssessor``, ``EscalationAgent``, ``PolicyLearningAgent`` …) remain the sole
+agents (``ConsideredAssessor``, ``EscalationAgent``, ``KnowledgeAgent`` …) remain the sole
 authority for the considered level and for escalation; the orchestrator is instructed to restate
 the fixed level verbatim. No raw modality data is placed in the case file — only derived facts
 already present on the reported event/assessment.
@@ -180,7 +180,7 @@ class ToolSpec:
 
 
 def connected_agent_specs() -> list[AgentSpec]:
-    """The six Connected Agents of the DELIBERATE tier, as MAF adapter descriptors.
+    """The five Connected Agents of the DELIBERATE tier, as MAF adapter descriptors.
 
     Ordering mirrors foundry-design.md §5. Each wraps an existing, tested Python class so the MAF
     graduation is orchestration-only — the reasoning logic is reused verbatim.
@@ -231,15 +231,6 @@ def connected_agent_specs() -> list[AgentSpec]:
             ),
             wraps="airacare_foundry.agents.briefing.BriefingAgent",
         ),
-        AgentSpec(
-            name="policy-learning",
-            role="Distill a versioned EdgePolicyUpdate from recurring patterns.",
-            instructions=(
-                "On recurring nighttime wanders, tune a personalized EdgePolicyUpdate (lower "
-                "wander_confidence, tailored reassure_prompt, version++). Never touch the T1 reply."
-            ),
-            wraps="airacare_foundry.agents.policy_learning.PolicyLearningAgent",
-        ),
     ]
 
 
@@ -272,7 +263,7 @@ def build_workflow(
     credential: object | None = None,
     require_sdk: bool = True,
 ) -> "CareWorkflow":
-    """Bind the six Connected Agents to a live Foundry model and return a :class:`CareWorkflow`.
+    """Bind the five Connected Agents to a live Foundry model and return a :class:`CareWorkflow`.
 
     Builds a Microsoft Agent Framework orchestrator agent on ``deployment`` (Azure OpenAI /
     AI Foundry, reached at ``endpoint`` over the Responses API — hence ``api_version="preview"``)
@@ -367,13 +358,21 @@ def case_file(
     *,
     patient_name: str | None = None,
     state: "PatientState | None" = None,
+    include_record: bool = True,
 ) -> str:
     """Render a fixed, privacy-scrubbed case file (plain text) for the advisory narrator.
 
     Includes only derived facts already carried by the reported event/assessment — event type,
     timestamps, the edge's own level/action, the considered level + reason, baseline drift, and a
-    *count* of voice-biomarker features (never the raw feature vector, transcripts, audio, video,
-    or point-cloud). This text is the sole input the model reasons over.
+    *count* of voice-biomarker features (the human-readable prose withholds the raw feature vector,
+    transcripts, audio, video, or point-cloud).
+
+    When ``include_record`` is true, a machine-readable ``DAILY EVENT RECORD (JSON)`` block is
+    appended: the exact scrubbed :class:`DailyLivingEvent` that crossed the A2A wire plus the
+    considered level. This is the authoritative record the deployed hosted agent persists (it is
+    instructed to call ``log_daily_event`` with this JSON *before* composing the narrative), so
+    persistence lives on the Foundry side and the local A2A server never touches the database. It is
+    still fully derived data — no raw modality bytes are present.
     """
     considered = assessment.considered_level if assessment is not None else event.edge_assessed_level
     reason = assessment.reason if assessment is not None else "(no considered reason recorded)"
@@ -392,9 +391,22 @@ def case_file(
         f"- edge action already taken: {event.edge_action_taken}",
         f"- CONSIDERED LEVEL (authoritative): {considered}",
         f"- considered reason: {reason}",
-        f"- voice-biomarker features present: {len(event.features)} (values withheld for privacy)",
+        f"- voice-biomarker features present: {len(event.features)} (values withheld from prose)",
         f"- context keys: {ctx_keys}",
     ]
+    if include_record:
+        from airacare_foundry.store.base import RecordedEvent
+
+        # Emit a RecordedEvent-shaped record ({event, considered_level}) so the deployed hosted
+        # agent can persist it as the daily_event ``record_json`` verbatim and it round-trips through
+        # the dashboard's CosmosEventStore (which deserializes record_json into a RecordedEvent).
+        record_json = RecordedEvent(event=event, considered_level=considered).model_dump_json()
+        lines += [
+            "",
+            "DAILY EVENT RECORD (JSON) — the authoritative privacy-scrubbed event, already filed to",
+            "the care record. Treat any considered level here as authoritative; reason only over it:",
+            record_json,
+        ]
     return "\n".join(lines)
 
 

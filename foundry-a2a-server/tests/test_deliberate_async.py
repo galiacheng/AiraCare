@@ -13,10 +13,8 @@ from airacare_foundry.agents.deliberate import (
     ThreadExecutor,
 )
 from airacare_foundry.agents.escalation import EscalationAgent, LadderStatus
-from airacare_foundry.agents.policy_learning import PolicyLearningAgent
 from airacare_foundry.contracts import DailyLivingEvent, utcnow
 from airacare_foundry.orchestrator import CareOrchestrator
-from airacare_foundry.store.base import BASE_POLICY_VERSION
 from airacare_foundry.tools.escalation_timer import ManualScheduler
 from airacare_foundry.tools.notify import NotificationTool
 
@@ -50,44 +48,19 @@ def test_inline_executor_runs_synchronously() -> None:
 
 
 def test_tier_disabled_is_noop() -> None:
-    from airacare_foundry.store.local import LocalPolicyStore
-
-    tier = DeliberateTier(
-        enabled=False,
-        policy_learning=PolicyLearningAgent(LocalPolicyStore(":memory:")),
-    )
+    tier = DeliberateTier(enabled=False)
     tier.schedule(_night_wander())
     tier.join()
     assert tier.scheduled == []
 
 
-def test_thread_executor_defers_policy_learning_until_join() -> None:
-    from airacare_foundry.store.local import LocalPolicyStore, seeded_local_store
-
-    policy_store = LocalPolicyStore(":memory:")
-    learning = PolicyLearningAgent(policy_store, enabled=True)
-    tier = DeliberateTier(enabled=True, policy_learning=learning, executor=ThreadExecutor())
-    orch = CareOrchestrator(
-        seeded_local_store(":memory:"), deliberate=tier, policy_store=policy_store
-    )
-
-    for _ in range(PolicyLearningAgent.WANDER_LEARN_THRESHOLD):
-        orch.report(_night_wander())
-    tier.join()  # await the background worker
-
-    # After draining, the learned policy is visible.
-    assert policy_store.get("p-001").version == BASE_POLICY_VERSION + 1
-
-
 def test_thread_executor_runs_escalation_ladder() -> None:
-    from airacare_foundry.store.local import LocalPolicyStore, seeded_local_store
+    from airacare_foundry.store.local import seeded_local_store
 
     sched, notifier = ManualScheduler(), NotificationTool()
     escalation = EscalationAgent(notifier=notifier, scheduler=sched)
     tier = DeliberateTier(enabled=True, escalation=escalation, executor=ThreadExecutor())
-    orch = CareOrchestrator(
-        seeded_local_store(":memory:"), deliberate=tier, policy_store=LocalPolicyStore(":memory:")
-    )
+    orch = CareOrchestrator(seeded_local_store(":memory:"), deliberate=tier)
 
     assessment = orch.report(_night_wander(level="L3", response="no_response"))
     assert assessment.considered_level == "L3"  # T1 response unaffected by T2

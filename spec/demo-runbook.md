@@ -138,7 +138,122 @@ story."*
 
 ---
 
-## 3. Judge-facing talking points (map to the criteria)
+## 3. Live cloud demo — exact manual steps (real deployed Foundry Hosted Agent)
+
+> This is the **live** end-to-end run: the edge talks to a **local A2A orchestrator adapter**
+> (`:8971`) that runs the deterministic edge/cloud safety logic, writes every event to **live
+> Cosmos**, and — asynchronously (T2, fire-and-forget) — hands a privacy-scrubbed *case file* to the
+> **deployed Azure AI Foundry Agent Service** agent (`airacare-care-orchestrator` **v5**, `gpt-5.4` +
+> Foundry IQ) for an advisory briefing. A **live dashboard** (`:8975`) reads the *same* Cosmos, so you
+> watch each event land. Unlike Beats 1–4 (local stub, offline-safe), this uses real cloud + real
+> Cosmos.
+
+**Why the edge endpoint is `:8971` (local) and not the Foundry URL:** the edge speaks the frozen
+**A2A / JSON-RPC** contract; the deployed Foundry agent speaks the OpenAI **Responses** protocol. The
+`:8971` adapter is the bridge — it does the deterministic assessment + Cosmos write, then calls the
+deployed agent. The edge never blocks on the cloud, and the deployed agent is **advisory only** — it
+restates the considered level and **never sets it**.
+
+```mermaid
+flowchart LR
+  E["Edge agent<br/>(cli, A2A/JSON-RPC)"] -- "airacare.report" --> A["Local A2A adapter :8971<br/>deterministic safety + Cosmos write"]
+  A -- "async case file (Responses)" --> F["Deployed Foundry Hosted Agent v5<br/>gpt-5.4 + Foundry IQ (advisory)"]
+  A -- "scrubbed DailyLivingEvent" --> C[("Cosmos DB")]
+  D["Dashboard :8975"] -- reads --> C
+```
+
+### 3.0 One-time env (Azure)
+```powershell
+az login                      # AAD token for the deployed agent + Key Vault access
+# Cosmos primary key -> env (both the adapter and dashboard read it):
+$env:AIRACARE_COSMOS_KEY = (az keyvault secret show `
+  --vault-name kv-airacare-beq4os --name airacare-cosmos-primary-key --query value -o tsv)
+```
+The deployed agent is already live in Foundry Agent Service — **nothing to start**. Its Responses
+endpoint is configured under `deliberate.hosted_agent_endpoint` (value =
+`AGENT_AIRACARE_CARE_ORCHESTRATOR_RESPONSES_ENDPOINT` from
+`foundry-hosted-agent/.azure/airacare-agent/.env`). Install the cloud deps once:
+`pip install -e "foundry-a2a-server[agents]"`.
+
+Use a **cosmos + hosted-agent** config (the session's `config.cosmos-foundry.yaml`, or add these keys
+to `foundry-a2a-server/config.yaml`):
+```yaml
+store:
+  backend: cosmos
+  cosmos_endpoint: "https://airacare-5cciixoa3zpdk.documents.azure.com:443/"
+  cosmos_credential: "${AIRACARE_COSMOS_KEY}"
+  cosmos_database: airacare
+  cosmos_auth: key
+deliberate:
+  enabled: true
+  executor: agents
+  hosted_agent_endpoint: "https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/openai/responses?api-version=v1"
+  hosted_agent_name: airacare-care-orchestrator
+```
+
+### 3.1 Terminal 1 — start the A2A orchestrator adapter (:8971)
+```powershell
+cd foundry-a2a-server
+python -m airacare_foundry.a2a_server --config config.cosmos-foundry.yaml
+```
+Expect: `AiraCare Foundry orchestrator listening on http://127.0.0.1:8971/a2a  [open (no auth)]`.
+The async advisory briefing runs off the safety path and is filed to the event store / visible on the
+dashboard — it is **not** echoed to this console by default (see the presenter aid at the end of §3).
+
+### 3.2 Terminal 2 — start the live care dashboard (:8975, reads Cosmos)
+```powershell
+cd foundry-a2a-server
+python -m airacare_foundry.dashboard.server --config config.cosmos-foundry.yaml --host 127.0.0.1 --port 8975
+# open http://127.0.0.1:8975/
+```
+
+### 3.3 Terminal 3 — the four patient responses (edge), one at a time
+The edge detects the 3 AM wake, **asks "are you okay?" aloud** (local voice), then acts on the reply
+and asynchronously reports to the adapter. Run each line, narrate, then refresh the dashboard.
+
+```powershell
+cd edge
+$EP = "http://127.0.0.1:8971/a2a"
+
+# 1) No response  -> edge escalates on its own -> L3
+python -m airacare_edge.cli --scenario no-response --cloud foundry --endpoint $EP --voice local --panel
+
+# 2) "I'm fine"   -> graded L1, gentle local reassurance (no family alarm)
+python -m airacare_edge.cli --scenario reply-ok    --cloud foundry --endpoint $EP --voice local --panel
+
+# 3) "help me"    -> distress -> escalate -> L3
+python -m airacare_edge.cli --scenario distress    --cloud foundry --endpoint $EP --voice local --panel
+
+# 4) unclear ("the garden over there") -> on-device LLM re-interprets the intent
+python -m airacare_edge.cli --scenario unclear     --cloud foundry --endpoint $EP --voice local --panel
+```
+
+What to point at per run:
+
+| Scenario | Spoken reply | Edge action | Cloud (considered) | On-device LLM |
+|---|---|---|---|---|
+| `no-response` | *(silence)* | escalated **L3** | L3 | not needed |
+| `reply-ok` | "I'm fine" | reassure **L1** | L1 | keyword fast-path |
+| `distress` | "help me" | escalated **L3** | L3 | keyword fast-path |
+| `unclear` | "the garden over there" | re-interpret, then act | per LLM | **🧠 LLM engages** |
+
+Each run prints the split-screen `--panel` (left = edge acted; right = Foundry replying **async**; red
+strip = the only thing that crossed — a structured `DailyLivingEvent`, never audio).
+
+### 3.4 Watch Cosmos fill up
+Refresh `http://127.0.0.1:8975/` after each scenario — event count, cognitive trajectory, event mix,
+and the edge-vs-cloud escalation funnel update **live** from the same Cosmos the adapter just wrote.
+
+> **Presenter aid — echo the deployed agent's briefing live.** To surface the async T2 advisory
+> briefing (and a `REAL DEPLOYED Foundry Hosted Agent (airacare-care-orchestrator v5)` banner) on the
+> adapter console during the demo, start Terminal 1 with the thin demo wrapper
+> `run_deployed_orchestrator.py <config>` instead of the module in §3.1. It wraps the config-built
+> narrator and prints each briefing to stderr; behavior is otherwise identical (same Cosmos writes,
+> same `:8971` A2A endpoint).
+
+---
+
+## 4. Judge-facing talking points (map to the criteria)
 
 | Criterion | What to point at |
 |---|---|
@@ -154,7 +269,7 @@ story."*
 
 ---
 
-## 4. Switching the edge to the real Foundry agent
+## 5. Switching the edge to the real Foundry agent
 
 No edge code changes — just config:
 ```yaml
@@ -168,7 +283,7 @@ credentials as required.
 
 ---
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -181,7 +296,7 @@ credentials as required.
 
 ---
 
-## 6. Reset between runs
+## 7. Reset between runs
 
 ```powershell
 Remove-Item -Recurse -Force .airacare_queue -ErrorAction SilentlyContinue   # clear offline backlog

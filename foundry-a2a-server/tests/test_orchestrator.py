@@ -1,11 +1,12 @@
-"""Orchestrator tests: considered assessment via the store-backed policy + config + policy."""
+"""Orchestrator tests: considered assessment via the store-backed policy + config."""
 
 from __future__ import annotations
 
 from airacare_foundry.agents.deliberate import DeliberateTier
 from airacare_foundry.config import FoundryConfig, PatientConfig
-from airacare_foundry.contracts import DailyLivingEvent, EdgePolicyUpdate, utcnow
+from airacare_foundry.contracts import DailyLivingEvent, utcnow
 from airacare_foundry.orchestrator import CareOrchestrator, default_orchestrator
+from airacare_foundry.store.base import BASE_POLICY_VERSION
 
 
 def _wander_event(level: str, action: str, response: str, patient_id: str = "p-001") -> DailyLivingEvent:
@@ -43,18 +44,12 @@ def test_deliberate_tier_scheduled_when_enabled() -> None:
     assert tier.scheduled == ["p-001"]
 
 
-def test_fetch_policy_piggyback() -> None:
-    from airacare_foundry.store.local import seeded_local_store
-
-    policy = EdgePolicyUpdate(version=2, patient_id="p-001", no_response_seconds=6.0)
-    orch = CareOrchestrator(seeded_local_store(":memory:"), policy=policy)
-
-    # report() stamps the current policy version so the edge knows to pull.
+def test_report_stamps_constant_policy_version() -> None:
+    # The orchestrator holds no policy control plane: every assessment carries the constant
+    # baseline version so the edge is always current (it never calls fetch_policy).
+    orch = default_orchestrator()
     assessment = orch.report(_wander_event("L2", "local_alert", "unclear"))
-    assert assessment.policy_version == 2
-    # Edge behind -> gets policy; edge current -> None.
-    assert orch.fetch_policy("p-001", since_version=1).version == 2
-    assert orch.fetch_policy("p-001", since_version=2) is None
+    assert assessment.policy_version == BASE_POLICY_VERSION
 
 
 def test_from_config_builds_local_store() -> None:

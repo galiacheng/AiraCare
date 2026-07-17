@@ -1,7 +1,7 @@
-"""Local stores — SQLite (file or in-memory) for patient state and edge policy.
+"""Local stores — SQLite (file or in-memory) for patient state and the filed-event log.
 
 Decision #6 = C for this scaffold: no Cosmos DB / Fabric. Single-table SQLite stores keep
-patient state (disease stage + rolling baseline) and the versioned edge policy local and
+patient state (disease stage + rolling baseline) and the append-only event log local and
 dependency-free. Use ``:memory:`` for tests/dev or a file path to persist across runs.
 """
 
@@ -11,7 +11,6 @@ import sqlite3
 import threading
 from datetime import datetime
 
-from airacare_foundry.contracts import EdgePolicyUpdate
 from airacare_foundry.store.base import PatientState, RecordedEvent
 
 
@@ -100,67 +99,6 @@ def seeded_local_store(
             )
         )
     return store
-
-
-class LocalPolicyStore:
-    """SQLite-backed :class:`PolicyStore` — the latest versioned policy per patient.
-
-    Stores the full :class:`EdgePolicyUpdate` as JSON keyed by ``patient_id``; only the most
-    recent version is retained (MVP). Shares the single-connection + lock pattern of
-    :class:`LocalPatientStateStore` so it is safe under the threaded A2A server.
-    """
-
-    def __init__(self, sqlite_path: str = ":memory:") -> None:
-        self._path = sqlite_path
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(sqlite_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._init_schema()
-
-    def _init_schema(self) -> None:
-        with self._lock:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS edge_policy (
-                    patient_id  TEXT PRIMARY KEY,
-                    version     INTEGER NOT NULL,
-                    policy_json TEXT NOT NULL
-                )
-                """
-            )
-            self._conn.commit()
-
-    def get(self, patient_id: str) -> EdgePolicyUpdate | None:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT policy_json FROM edge_policy WHERE patient_id = ?",
-                (patient_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        return EdgePolicyUpdate.model_validate_json(row["policy_json"])
-
-    def upsert(self, policy: EdgePolicyUpdate) -> None:
-        with self._lock:
-            self._conn.execute(
-                """
-                INSERT INTO edge_policy (patient_id, version, policy_json)
-                VALUES (:patient_id, :version, :policy_json)
-                ON CONFLICT(patient_id) DO UPDATE SET
-                    version = excluded.version,
-                    policy_json = excluded.policy_json
-                """,
-                {
-                    "patient_id": policy.patient_id,
-                    "version": policy.version,
-                    "policy_json": policy.model_dump_json(),
-                },
-            )
-            self._conn.commit()
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
 
 class LocalEventStore:

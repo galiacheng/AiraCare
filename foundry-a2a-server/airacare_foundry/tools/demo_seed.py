@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.backend:
         config.store.backend = args.backend
 
-    _state, _policy, event_store = _build_stores(config)
+    _state, event_store = _build_stores(config)
     count = seed_event_store(event_store, patient_id=args.patient_id, days=args.days)
     print(
         f"Seeded {count} events for {args.patient_id} "

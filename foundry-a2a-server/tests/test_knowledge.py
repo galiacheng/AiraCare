@@ -87,12 +87,10 @@ def test_azure_kb_placeholder_raises() -> None:
 def test_knowledge_runs_in_deliberate_tier() -> None:
     from airacare_foundry.agents.deliberate import DeliberateTier, ThreadExecutor
     from airacare_foundry.orchestrator import CareOrchestrator
-    from airacare_foundry.store.local import LocalPolicyStore, seeded_local_store
+    from airacare_foundry.store.local import seeded_local_store
 
     tier = DeliberateTier(enabled=True, knowledge=KnowledgeAgent(), executor=ThreadExecutor())
-    orch = CareOrchestrator(
-        seeded_local_store(":memory:"), deliberate=tier, policy_store=LocalPolicyStore(":memory:")
-    )
+    orch = CareOrchestrator(seeded_local_store(":memory:"), deliberate=tier)
     orch.report(_event())
     tier.join()
 

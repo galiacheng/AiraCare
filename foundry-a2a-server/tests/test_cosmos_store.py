@@ -16,7 +16,7 @@ import pytest
 from airacare_foundry.config import FoundryConfig, PatientConfig, StoreConfig
 from airacare_foundry.orchestrator import _build_stores
 from airacare_foundry.store import cosmos as cosmos_mod
-from airacare_foundry.store.base import EventStore, PatientStateStore, PolicyStore
+from airacare_foundry.store.base import EventStore, PatientStateStore
 
 _HAS_COSMOS = importlib.util.find_spec("azure.cosmos") is not None
 
@@ -25,8 +25,6 @@ def test_cosmos_classes_declare_protocol_methods() -> None:
     # Structural conformance without constructing (which needs the SDK + an account).
     assert callable(cosmos_mod.CosmosPatientStateStore.get)
     assert callable(cosmos_mod.CosmosPatientStateStore.upsert)
-    assert callable(cosmos_mod.CosmosPolicyStore.get)
-    assert callable(cosmos_mod.CosmosPolicyStore.upsert)
     assert callable(cosmos_mod.CosmosEventStore.append)
     assert callable(cosmos_mod.CosmosEventStore.list_for_patient)
 
@@ -97,10 +95,9 @@ def test_aad_backend_needs_only_endpoint(monkeypatch) -> None:
         _build_stores(config)
 
 
-def test_local_backend_still_builds_all_three_stores() -> None:
+def test_local_backend_still_builds_both_stores() -> None:
     config = FoundryConfig(patient=PatientConfig(id="p-001", name="Grandpa Zhang"))
-    state, policy, events = _build_stores(config)
+    state, events = _build_stores(config)
     assert isinstance(state, PatientStateStore)
-    assert isinstance(policy, PolicyStore)
     assert isinstance(events, EventStore)
     assert state.get("p-001") is not None  # seeded flagship patient

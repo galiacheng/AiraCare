@@ -1,9 +1,10 @@
 """A2A server tests: the Foundry server speaks the edge's JSON-RPC contract over HTTP.
 
-A raw urllib client exercises both wire methods (``airacare.report`` +
-``airacare.fetch_policy``) with no edge dependency; a second test uses the edge's own
-``A2AClient`` (skipped if edge isn't importable) to prove the drop-in works end-to-end —
-the exact client the edge ships points at this server and gets a CloudAssessment.
+A raw urllib client exercises the ``airacare.report`` wire method with no edge dependency; a
+second test uses the edge's own ``A2AClient`` (skipped if edge isn't importable) to prove the
+drop-in works end-to-end — the exact client the edge ships points at this server and gets a
+CloudAssessment. The server no longer serves ``airacare.fetch_policy`` (edge owns policy), so an
+edge that asks gets a graceful ``None``.
 """
 
 from __future__ import annotations
@@ -14,10 +15,9 @@ import urllib.request
 
 import pytest
 
-from airacare_foundry.a2a_server import FETCH_POLICY_METHOD, REPORT_METHOD, FoundryA2AServer
-from airacare_foundry.contracts import DailyLivingEvent, EdgePolicyUpdate, utcnow
-from airacare_foundry.orchestrator import CareOrchestrator
-from airacare_foundry.store.local import seeded_local_store
+from airacare_foundry.a2a_server import REPORT_METHOD, FoundryA2AServer
+from airacare_foundry.contracts import DailyLivingEvent, utcnow
+from airacare_foundry.store.base import BASE_POLICY_VERSION
 
 
 def _wander_event(level: str, action: str, response: str) -> DailyLivingEvent:
@@ -68,24 +68,12 @@ def test_report_roundtrip_l1_no_notifications() -> None:
     assert result["caregiver_notifications"] == []
 
 
-def test_fetch_policy_returns_newer_version() -> None:
-    policy = EdgePolicyUpdate(version=3, patient_id="p-001", wander_confidence=0.6)
-    orch = CareOrchestrator(seeded_local_store(":memory:"), policy=policy)
-    with FoundryA2AServer(orch, port=0) as server:
-        # Edge is behind (v1) -> gets the new policy.
-        newer = _call(server.endpoint, FETCH_POLICY_METHOD, {"patient_id": "p-001", "since_version": 1})
-        # Edge already current (v3) -> nothing to fetch.
-        current = _call(server.endpoint, FETCH_POLICY_METHOD, {"patient_id": "p-001", "since_version": 3})
-    assert newer["result"]["version"] == 3
-    assert current["result"] is None
-
-
-def test_report_stamps_policy_version() -> None:
-    policy = EdgePolicyUpdate(version=5, patient_id="p-001")
-    orch = CareOrchestrator(seeded_local_store(":memory:"), policy=policy)
-    with FoundryA2AServer(orch, port=0) as server:
+def test_report_stamps_constant_policy_version() -> None:
+    # The server holds no policy control plane: every assessment carries the constant baseline
+    # version, so the edge is always current and never calls fetch_policy.
+    with FoundryA2AServer(port=0) as server:
         body = _report(server.endpoint, _wander_event("L2", "local_alert", "unclear"))
-    assert body["result"]["policy_version"] == 5
+    assert body["result"]["policy_version"] == BASE_POLICY_VERSION
 
 
 def test_unknown_method_returns_error() -> None:
@@ -118,7 +106,7 @@ def test_edge_a2a_client_drops_in() -> None:
     with FoundryA2AServer(port=0) as server:
         client = a2a_client.A2AClient(server.endpoint)
         assessment = client.report(event)
-        # No policy configured on the default orchestrator -> nothing newer to fetch.
+        # Server no longer serves fetch_policy (400 unknown method) -> client returns None gracefully.
         policy = client.fetch_policy("p-001", since_version=1)
 
     assert assessment is not None

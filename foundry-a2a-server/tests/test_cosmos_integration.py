@@ -2,7 +2,7 @@
 
 Skipped unless ``AIRACARE_COSMOS_ENDPOINT`` is set, so CI/offline runs stay green. Point it at
 the local **Azure Cosmos DB Emulator** (self-signed cert → set ``AIRACARE_COSMOS_TLS_VERIFY=0``)
-or a real account. These prove the three Cosmos stores actually persist and query correctly —
+or a real account. These prove the two Cosmos stores actually persist and query correctly —
 the piece the structural tests (``test_cosmos_store.py``) cannot cover.
 
 Emulator quickstart (Docker):
@@ -45,20 +45,18 @@ def stores():
     from airacare_foundry.store.cosmos import (
         CosmosEventStore,
         CosmosPatientStateStore,
-        CosmosPolicyStore,
     )
 
     kw = {"database": _DB, "auth": "key", "tls_verify": _TLS}
     state = CosmosPatientStateStore(_ENDPOINT, _KEY, **kw)
-    policy = CosmosPolicyStore(_ENDPOINT, _KEY, **kw)
     events = CosmosEventStore(_ENDPOINT, _KEY, **kw)
-    yield state, policy, events
+    yield state, events
 
 
 def test_patient_state_roundtrip(stores):
     from airacare_foundry.store.base import PatientState
 
-    state, _, _ = stores
+    state, _ = stores
     assert state.get("p-live") is None
     state.upsert(PatientState(patient_id="p-live", name="Live Test", disease_stage="severe"))
     got = state.get("p-live")
@@ -67,21 +65,11 @@ def test_patient_state_roundtrip(stores):
     assert got.disease_stage == "severe"
 
 
-def test_policy_version_gate(stores):
-    from airacare_foundry.contracts import EdgePolicyUpdate
-
-    _, policy, _ = stores
-    assert policy.get("p-live") is None
-    policy.upsert(EdgePolicyUpdate(version=5, patient_id="p-live", wander_confidence=0.6))
-    got = policy.get("p-live")
-    assert got is not None and got.version == 5
-
-
 def test_event_append_and_range_query(stores):
     from airacare_foundry.contracts import DailyLivingEvent
     from airacare_foundry.store.base import RecordedEvent
 
-    _, _, events = stores
+    _, events = stores
     base = datetime(2026, 7, 1, tzinfo=timezone.utc)
     for day in range(5):
         ev = DailyLivingEvent(
@@ -112,7 +100,7 @@ def test_orchestrator_trend_over_cosmos(stores):
     from airacare_foundry.agents.cognitive_trend import CognitiveTrendAgent
     from airacare_foundry.tools.demo_seed import generate_events, to_records
 
-    _, _, events = stores
+    _, events = stores
     pid = "p-trend"
     for rec in to_records(generate_events(patient_id=pid)):
         events.append(rec)
