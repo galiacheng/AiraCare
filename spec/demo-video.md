@@ -1,6 +1,7 @@
 # AiraCare — 1–2 Minute Demo Video Storyboard
 
-A recording script for a **90–110 second** video that lands the three pitch anchors —
+A recording script for a **strict 90-second** video (hard cap **1:30**; optional **1:50** variant in §2)
+that lands the three pitch anchors —
 **hybrid edge/cloud division**, the **privacy boundary**, and **graded escalation** — while
 making two things *visible* that the shipped CLI hides:
 
@@ -71,17 +72,33 @@ Reply WAVs ship in `spec/tools/voice-replies/` (`distress.wav`, `reply-ok.wav`, 
 
 **Rule: open on the situation, not the tech.** No jargon, no scrolling code until beat 4.
 
-| # | Time | Zone | On screen | Voiceover (≈) |
-|---|------|------|-----------|----------------|
-| 1 | 0:00–0:08 | A+C | Dashboard + terminal **in one frame, still** — do **not** scroll code yet | *"It's 3 AM. A person with Alzheimer's leaves bed. **AiraCare is already running inside the home.**"* |
-| 2 | 0:08–0:25 | A | `reply-ok`: edge **speaks** the prompt; `🎙️ edge heard (Whisper ASR) → 'ok'`; **L1** | *"The edge asks 'are you okay?' — and **actually hears** the answer, on-device. 'I'm fine' → a gentle reassurance. **The system doesn't over-alert.**"* |
-| 3 | 0:25–0:42 | A | `distress`: `edge heard → 'distress'`; **L3 escalated** — **flash a red UI highlight + a short alert sound** on the escalation line | *"Now — 'Help me.' The edge decides **L3** and acts **immediately, locally, even offline**. No waiting on the cloud."* |
-| 4 | 0:42–0:55 | A | 🔒 boundary feed — **hold on ~6–8 key lines only** (see §2a), don't scroll the whole payload | *"This is **the only thing sent to Foundry**. No raw audio. No raw video. Only derived, scrubbed signals."* |
-| 5 | 0:55–1:18 | A | ☁️ Foundry panel: `considered_level = L3` **then** the grounded briefing + *"Grounded by AiraCare guidelines: Exit-seeking…, Nighttime wandering response…"* (speed-ramp the wait — §3) | *"Foundry adds what the edge **shouldn't** do locally: longer reasoning, care knowledge, and a **grounded briefing for the family — with citations**. It confirms the level; it never overrides safety."* |
-| 6 | 1:18–1:30 | C | Dashboard refresh — event count ticks up; trajectory + escalation funnel update → **end card** | *"Every event becomes a durable record for the care team."* → **End card: "Fast at the edge. Smart in Foundry. Private by design."** |
+**Timing is strict.** Each beat has a fixed **duration** and a **voiceover budget** (max words the
+narrator may speak *within that beat's talk window*, at ≈ 2.6 words/sec of clear delivery — the rest
+of the beat is on-screen action: the edge speaking, Whisper transcribing, or the speed-ramped cloud
+wait). **Do not exceed the VO budget** — if a take runs long, cut words, not seconds. The cumulative
+clock must hit each **Ends at** mark exactly.
 
-> **Total ≈ 90s.** To reach ~110s, add `no-response` between beats 3 and 4 (silence → edge
-> escalates with no reply at all — the strongest "acts without the patient *or* the cloud" moment).
+| # | Time | Dur | Ends at | VO budget | Zone | On screen | Voiceover (≈) |
+|---|------|-----|---------|-----------|------|-----------|----------------|
+| 1 | 0:00–0:08 | 8s | 0:08 | ≤ 20 w | A+C | Dashboard + terminal **in one frame, still** — do **not** scroll code yet | *"It's 3 AM. A person with Alzheimer's leaves bed. **AiraCare is already running inside the home.**"* (16 w) |
+| 2 | 0:08–0:25 | 17s | 0:25 | ≤ 30 w | A | `reply-ok`: edge **speaks** the prompt; `🎙️ edge heard (Whisper ASR) → 'ok'`; **L1** | *"The edge asks 'are you okay?' — and **actually hears** the answer, on-device. 'I'm fine' → a gentle reassurance. **The system doesn't over-alert.**"* (23 w) |
+| 3 | 0:25–0:42 | 17s | 0:42 | ≤ 30 w | A | `distress`: `edge heard → 'distress'`; **L3 escalated** — **flash a red UI highlight + a short alert sound** on the escalation line | *"Now — 'Help me.' The edge decides **L3** and acts **immediately, locally, even offline**. No waiting on the cloud."* (19 w) |
+| 4 | 0:42–0:55 | 13s | 0:55 | ≤ 30 w | A | 🔒 boundary feed — **hold on ~6–8 key lines only** (see §2a), don't scroll the whole payload | *"This is **the only thing sent to Foundry**. No raw audio. No raw video. Only derived, scrubbed signals."* (18 w) |
+| 5 | 0:55–1:18 | 23s | 1:18 | ≤ 33 w | A | ☁️ Foundry panel: `considered_level = L3` **then** the grounded briefing + *"Grounded by AiraCare guidelines: Exit-seeking…, Nighttime wandering response…"* (speed-ramp the wait — §3) | *"Foundry adds what the edge **shouldn't** do locally: longer reasoning, care knowledge, and a **grounded briefing for the family — with citations**. It confirms the level; it never overrides safety."* (30 w) |
+| 6 | 1:18–1:30 | 12s | **1:30** | ≤ 16 w | C | Dashboard refresh — event count ticks up; trajectory + escalation funnel update → **end card** | *"Every event becomes a durable record for the care team."* (10 w) → **End card: "Fast at the edge. Smart in Foundry. Private by design."** (held ~4s, silent) |
+
+> **Total = exactly 90s (1:30). Sum check:** 8 + 17 + 17 + 13 + 23 + 12 = **90s**. VO budget total ≤ 159 w
+> (actual ≈ 116 w) — comfortably inside a 90s track.
+>
+> **Optional 1:50 variant** — insert `no-response` as a new **Beat 3b** between beats 3 and 4 (silence →
+> edge escalates with no reply at all — the strongest "acts without the patient *or* the cloud" moment).
+> Re-timed so every later mark shifts by **+20s**:
+>
+> | # | Time | Dur | Ends at | VO budget | On screen | Voiceover (≈) |
+> |---|------|-----|---------|-----------|-----------|----------------|
+> | 3b | 0:42–1:02 | 20s | 1:02 | ≤ 24 w | `no-response`: prompt spoken, **silence**, edge still **L3 escalates** | *"And if there's **no answer at all**? The edge still escalates — it never waits for permission to keep someone safe."* (20 w) |
+>
+> Then beats 4→6 become 1:02–1:15, 1:15–1:38, 1:38–1:50. **New total = exactly 110s (1:50).**
 
 ### 2a. Subtitles / on-screen captions (burn these in)
 
@@ -191,7 +208,7 @@ python spec/tools/foundry_demo_feed.py --endpoint $EP --voice local `
 # …or the fast scripted cut (no audio hardware needed):
 python spec/tools/foundry_demo_feed.py --endpoint $EP --scenarios reply-ok distress
 
-# Optional 3rd beat only if you have ~110s (silence → escalate; strongest "no reply, offline" moment):
+# Optional Beat 3b only if you're doing the 1:50 variant (silence → escalate; strongest "no reply, offline" moment):
 #   python spec/tools/foundry_demo_feed.py --endpoint $EP --voice local --scenarios reply-ok distress no-response
 ```
 
@@ -201,7 +218,7 @@ What each scenario proves on screen:
 |---|---|---|---|---|---|
 | `distress` | "help me" | **L3** escalated | L3 | real distress → immediate action + Foundry value | ✅ hero |
 | `reply-ok` | "I'm fine" | **L1** reassured | L1 | graded, not spammy | ✅ contrast |
-| `no-response` | *(silence)* | **L3** escalated | L3 | acts with no patient reply, offline-safe | ➕ optional (~110s) |
+| `no-response` | *(silence)* | **L3** escalated | L3 | acts with no patient reply, offline-safe | ➕ Beat 3b (1:50 variant) |
 
 > `unclear` ("the garden over there" → L2 via the on-device LLM path) exists but is **left out of
 > the short cut** — it needs Ollama and doesn't add a new anchor in 90s.
