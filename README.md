@@ -2,6 +2,8 @@
 
 **A guardian that watches on the edge, thinks in the cloud.**
 
+![AiraCare architecture — real-time edge intelligence, Azure AI Foundry reasoning, and a care dashboard, split by an on-device privacy boundary](spec/media/AiraCare_Architecture_original_style_1920x1080_16x9.png)
+
 AiraCare is a **hybrid edge–Foundry AI agent** for in-home Alzheimer's care. A local
 **edge agent** does privacy-sensitive, real-time sensing **and self-determined graded
 response** inside the home — it decides L0–L3 and acts **immediately, even offline**. A
@@ -12,6 +14,19 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
 > Flagship scenario: **Nighttime Wandering** — 3 AM, the patient leaves the bedroom; the
 > edge confirms by voice and escalates **on its own**, while the cloud follows up
 > asynchronously with an enriched briefing.
+
+## How it works, at a glance
+
+1. **Edge (in the home)** — sensors + voice → on-device understanding (Whisper ASR, keyword/LLM
+   intent) → **grade L0–L3 and act in milliseconds** (speak, light, alarm, SMS) → store-and-forward
+   if offline. The edge is the **sole safety authority**.
+2. **Privacy boundary** — only a de-identified, structured `DailyLivingEvent` crosses. **Raw
+   audio/video never leaves the home.**
+3. **Foundry (Azure AI Foundry)** — a hosted agent over **standard A2A**: deterministic middleware
+   confirms the considered level *before* the model, `gpt-5.4` writes a grounded, **cited** briefing,
+   and every event is persisted to **Cosmos DB** — all asynchronous.
+4. **Dashboard** — a clinician-facing view reading the *same* Cosmos: cognitive trajectory, event
+   mix, escalation funnel, nighttime risk.
 
 ## Why it's inherently hybrid
 
@@ -34,6 +49,7 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
 | [`spec/foundry-design.md`](spec/foundry-design.md) | Foundry Care Orchestrator design (async considered assessment, specialist tools, escalation, data layer; with an "as built" reconciliation) |
 | [`spec/foundry-a2a-hosting.md`](spec/foundry-a2a-hosting.md) | How the hosted agent exposes **standard A2A** and preserves determinism (enablement runbook + design note) |
 | [`spec/demo-runbook.md`](spec/demo-runbook.md) | **Step-by-step demo script** |
+| [`spec/demo-video.md`](spec/demo-video.md) | 1–2 min demo-video storyboard + the `foundry_demo_feed` presenter |
 | [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
 | [`foundry-hosted-agent/`](foundry-hosted-agent/) | Foundry **hosted agent** (`airacare-care-orchestrator`) — deterministic considered assessment + escalation + Cosmos write, deployed on Azure AI Foundry Agent Service; see [`foundry-hosted-agent/README.md`](foundry-hosted-agent/README.md) |
 | [`dashboard/`](dashboard/) | Standalone **care dashboard** (Python) reading the filed events from Cosmos — see [`dashboard/README.md`](dashboard/README.md) |
@@ -105,4 +121,6 @@ python -m airacare_dashboard.server --config config.cosmos.yaml --port 8975   # 
 # offline dry-run with seeded demo data (no Azure): python -m airacare_dashboard.server --seed
 ```
 
-For the full voice + LLM + offline demo, follow [`spec/demo-runbook.md`](spec/demo-runbook.md).
+For the full voice + LLM + offline demo, follow [`spec/demo-runbook.md`](spec/demo-runbook.md). To
+record a 1–2 min walkthrough (real voice + the full Foundry response), see
+[`spec/demo-video.md`](spec/demo-video.md) and run `spec/tools/foundry_demo_feed.py`.
