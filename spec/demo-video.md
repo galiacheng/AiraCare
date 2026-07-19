@@ -7,7 +7,7 @@ making two things *visible* that the shipped CLI hides:
 1. **Every event the edge forwards to Foundry** (the exact privacy-scrubbed `DailyLivingEvent`
    JSON that crosses the home boundary), and
 2. **Foundry's value on top of the instant edge action** — the deterministic considered level
-   *plus* the `gpt-5.4` family briefing **with its knowledge-base citations**.
+   *plus* the Foundry hosted model's family briefing **with its knowledge-base citations**.
 
 It also shows the edge doing **real on-device voice recognition** (the edge speaks the prompt;
 Whisper transcribes the reply).
@@ -69,18 +69,53 @@ Reply WAVs ship in `spec/tools/voice-replies/` (`distress.wav`, `reply-ok.wav`, 
 
 ## 2. The 90-second cut (beat by beat)
 
+**Rule: open on the situation, not the tech.** No jargon, no scrolling code until beat 4.
+
 | # | Time | Zone | On screen | Voiceover (≈) |
 |---|------|------|-----------|----------------|
-| 1 | 0:00–0:10 | A | Title card → `--voice local` warms up (`warm-up: {'asr': True…}`) | *"3 AM. An Alzheimer's patient gets out of bed. AiraCare runs **on the edge, in the home**."* |
-| 2 | 0:10–0:25 | A | `reply-ok`: edge **speaks** the prompt; `🎙️ edge heard (Whisper ASR) → 'ok'`; **L1 reassured** | *"The edge asks 'are you okay?' and **actually hears** the answer — on-device Whisper, no audio ever leaves. 'I'm fine' → graded **L1**, a gentle local reassurance. No alarm."* |
-| 3 | 0:25–0:40 | A | `distress`: `edge heard → 'distress'`; **L3 escalated** *now* | *"'Help me' → **L3**. The edge escalates **immediately, on its own** — light, alarm, SMS to family — even fully offline. It never waits on the cloud."* |
-| 4 | 0:40–0:52 | A | 🔒 the boundary-feed JSON block scrolls into view | *"And this red boundary is **the only thing that crosses** — a structured, privacy-scrubbed event. No audio. No video. Just derived signals."* |
-| 5 | 0:52–1:15 | A | ☁️ Foundry panel: `considered_level = L3` **then** the grounded briefing with *"Grounded by AiraCare guidelines: Exit-seeking…, Nighttime wandering response…"* | *"Asynchronously, the **Foundry hosted agent** adds value the edge can't: deterministic middleware **confirms L3 before any model runs** — the LLM can't override safety — then `gpt-5.4` writes a warm family briefing **grounded in a knowledge base, with citations**."* |
-| 6 | 1:15–1:30 | C | Dashboard refresh — event count ticks up, trajectory + escalation funnel update | *"Every event is persisted to Cosmos, so one clinician view shows the **cognitive trajectory** and the **edge-vs-cloud escalation funnel** over time. Fast at the edge, smart in the cloud, private by construction."* |
+| 1 | 0:00–0:08 | A+C | Dashboard + terminal **in one frame, still** — do **not** scroll code yet | *"It's 3 AM. A person with Alzheimer's leaves bed. **AiraCare is already running inside the home.**"* |
+| 2 | 0:08–0:25 | A | `reply-ok`: edge **speaks** the prompt; `🎙️ edge heard (Whisper ASR) → 'ok'`; **L1** | *"The edge asks 'are you okay?' — and **actually hears** the answer, on-device. 'I'm fine' → a gentle reassurance. **The system doesn't over-alert.**"* |
+| 3 | 0:25–0:42 | A | `distress`: `edge heard → 'distress'`; **L3 escalated** — **flash a red UI highlight + a short alert sound** on the escalation line | *"Now — 'Help me.' The edge decides **L3** and acts **immediately, locally, even offline**. No waiting on the cloud."* |
+| 4 | 0:42–0:55 | A | 🔒 boundary feed — **hold on ~6–8 key lines only** (see §2a), don't scroll the whole payload | *"This is **the only thing sent to Foundry**. No raw audio. No raw video. Only derived, scrubbed signals."* |
+| 5 | 0:55–1:18 | A | ☁️ Foundry panel: `considered_level = L3` **then** the grounded briefing + *"Grounded by AiraCare guidelines: Exit-seeking…, Nighttime wandering response…"* (speed-ramp the wait — §3) | *"Foundry adds what the edge **shouldn't** do locally: longer reasoning, care knowledge, and a **grounded briefing for the family — with citations**. It confirms the level; it never overrides safety."* |
+| 6 | 1:18–1:30 | C | Dashboard refresh — event count ticks up; trajectory + escalation funnel update → **end card** | *"Every event becomes a durable record for the care team."* → **End card: "Fast at the edge. Smart in Foundry. Private by design."** |
 
-> **Total ≈ 90s.** To reach ~110s, add the `no-response` scenario between beats 3 and 4
-> (silence → edge escalates with no reply at all — the strongest "acts without the patient/cloud"
-> moment).
+> **Total ≈ 90s.** To reach ~110s, add `no-response` between beats 3 and 4 (silence → edge
+> escalates with no reply at all — the strongest "acts without the patient *or* the cloud" moment).
+
+### 2a. Subtitles / on-screen captions (burn these in)
+
+Clean, readable captions matter more than the raw terminal text. Superimpose these:
+
+- **Beat 2 (reply-ok):**
+  ```
+  On-device Whisper hears: “I'm fine”
+  Edge decision: L1 reassurance
+  No cloud dependency · No alarm
+  ```
+- **Beat 3 (distress):**
+  ```
+  On-device Whisper hears: “Help me”
+  Edge decision: L3 escalation
+  Immediate local action, even offline
+  ```
+- **Beat 4 (privacy boundary)** — a simplified, human-readable restatement of the event to overlay
+  while the real payload is on screen (keep it to ~6–8 lines):
+  ```json
+  {
+    "event_type": "night_wandering_distress",
+    "edge_level": "L3",
+    "raw_audio_uploaded": false,
+    "raw_video_uploaded": false,
+    "signals": ["speech_intent", "motion", "time_context"]
+  }
+  ```
+  > This overlay is a *simplified caption*. The actual terminal payload uses the real
+  > `DailyLivingEvent` fields (`type`, `edge_assessed_level`, `edge_action_taken`, `context`, …) —
+  > there are **no** audio/video fields at all, because those bytes never enter the payload. Show the
+  > real JSON; the caption just makes the privacy point legible in one glance.
+- **Beat 5 (Foundry):** `considered_level = L3` · `Grounded briefing with citations`
+- **End card:** **Fast at the edge. Smart in Foundry. Private by design.**
 
 ---
 
@@ -98,11 +133,30 @@ Windows) for the speed-ramp + captions.
 
 ---
 
+## 3a. Record safely — what must NOT appear on screen
+
+- **No secrets or infra identifiers in frame.** Before recording, run the token/key exports and
+  `az login` **off-camera** (a separate window), and **clear the scrollback**. The recorded terminal
+  must not show: the Foundry **endpoint URL**, any **access token**, **tenant/subscription IDs**, or
+  **Key Vault / secret names**. If any leak in, blur/crop them in the editor.
+  - Tip: set `$EP` and `$env:AIRACARE_A2A_TOKEN` in a pre-roll step, then `Clear-Host` before the
+    first recorded command so only `python spec/tools/foundry_demo_feed.py …` is visible.
+- **Careful medical wording.** This is decision *support*, not medical practice. Say **"diagnostic
+  assistance"**, **"clinical observation support"**, or **"professional insight"** — **never
+  "diagnosis"** or "the AI diagnoses." The edge and Foundry **assist** caregivers and clinicians;
+  they do not diagnose or treat.
+- **Don't linger on the cloud wait.** Speed-ramp (4×) or hard-cut the ~20–26s Foundry round trip
+  (see §3) so pacing stays tight.
+
+---
+
 ## 4. Pre-stage checklist (before you hit record)
 
-- [ ] `az login`; token exported: `$env:AIRACARE_A2A_TOKEN` (resource `https://ai.azure.com`).
-- [ ] Cosmos key for the dashboard: `$env:AIRACARE_COSMOS_KEY` (Key Vault
-      `kv-airacare-beq4os`, secret `airacare-cosmos-primary-key`).
+- [ ] **Off-camera:** `az login`; export `$env:AIRACARE_A2A_TOKEN` (resource `https://ai.azure.com`)
+      and `$env:AIRACARE_COSMOS_KEY` — then `Clear-Host` so **no endpoint/token/Key-Vault name is in
+      frame** (see §3a).
+- [ ] Cosmos key for the dashboard comes from Key Vault `kv-airacare-beq4os`, secret
+      `airacare-cosmos-primary-key` (acquire it off-camera).
 - [ ] Dashboard up (Zone C): `cd dashboard; python -m airacare_dashboard.server --config config.cosmos.yaml --host 127.0.0.1 --port 8975` → open `http://127.0.0.1:8975/`.
 - [ ] **Pre-warm** the presenter once (`--voice local` downloads the Whisper model on first run) so
       the recording starts warm.
@@ -161,7 +215,7 @@ Straight from a live run — this is Foundry's demonstrable value the shipped CL
 ```
 ☁️ FOUNDRY RESPONSE — the value on top of the instant edge action:
    • Deterministic considered_level = L3 (computed by middleware BEFORE the model — the LLM cannot override it)
-   • gpt-5.4 family briefing, grounded in a knowledge base:
+   • Foundry hosted model — family briefing, grounded in a knowledge base:
        … A gentle next step for the family is to calmly confirm he is safely inside and settled …
        Grounded by AiraCare guidelines: Exit-seeking and elopement risk, Nighttime wandering
        response, Home safety and wandering prevention.

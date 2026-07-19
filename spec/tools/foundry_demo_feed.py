@@ -8,7 +8,7 @@ Purpose (a recording aid for the 1–2 minute demo video). For each scenario it:
      is the *only* thing crossing the home boundary.
   3. Forwards that record to the **live Foundry hosted agent** over standard A2A and prints the
      **full** response the shipped CLI hides — the deterministic ``considered_level`` *and* the
-     gpt-5.4 family briefing **with its knowledge-base citations** ("Grounded by AiraCare
+     Foundry hosted model — family briefing **with its knowledge-base citations** ("Grounded by AiraCare
      guidance: …"). That briefing + grounding is Foundry's value on top of the instant edge action.
 
 The edge always acts locally first; Foundry is advisory (it never sets the risk level — the hosted
@@ -159,7 +159,7 @@ def _print_foundry(client: VerboseFoundryClient, event: DailyLivingEvent) -> Non
         print(f"     • Deterministic considered_level = {considered.considered_level} "
               "(computed by middleware BEFORE the model — the LLM cannot override it)")
     if briefing:
-        print("     • gpt-5.4 family briefing, grounded in a knowledge base:")
+        print("     • Foundry hosted model — family briefing, grounded in a knowledge base:")
         for line in briefing.splitlines():
             if line.strip():
                 print(f"         {line.strip()}")
