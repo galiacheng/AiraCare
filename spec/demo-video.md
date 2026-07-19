@@ -33,12 +33,13 @@ $env:AIRACARE_A2A_TOKEN = (az account get-access-token `
 $EP = "https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/a2a"
 
 # Fast/scripted replies (no audio hardware) — good for the boundary+Foundry beats:
-python spec/tools/foundry_demo_feed.py --endpoint $EP
+python spec/tools/foundry_demo_feed.py --endpoint $EP --scenarios reply-ok distress
 
 # Real on-device voice recognition (edge speaks the prompt, Whisper transcribes bundled reply WAVs):
-python spec/tools/foundry_demo_feed.py --endpoint $EP --voice local
+python spec/tools/foundry_demo_feed.py --endpoint $EP --voice local --scenarios reply-ok distress
 ```
 
+The short cut is **2 cases: `reply-ok` (contrast) then `distress` (hero + Foundry climax)** — see §2.
 Reply WAVs ship in `spec/tools/voice-replies/` (`distress.wav`, `reply-ok.wav`, `unclear.wav`);
 `no-response` is silence. `--voice local` defaults to that folder — override with `--wav-dir`.
 
@@ -128,22 +129,28 @@ $env:AIRACARE_A2A_TOKEN = (az account get-access-token `
   --resource https://ai.azure.com --query accessToken -o tsv)
 $EP = "https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/a2a"
 
-# Full real-voice cut (edge speaks; Whisper transcribes bundled WAVs; silence for no-response):
+# Recommended 2-case real-voice cut (edge speaks; Whisper transcribes bundled WAVs):
+#   reply-ok = the graded contrast (L1); distress = hero shot (L3 escalate + Foundry's grounded briefing)
 python spec/tools/foundry_demo_feed.py --endpoint $EP --voice local `
-  --scenarios reply-ok distress no-response
+  --scenarios reply-ok distress
 
 # …or the fast scripted cut (no audio hardware needed):
-python spec/tools/foundry_demo_feed.py --endpoint $EP --scenarios reply-ok distress no-response
+python spec/tools/foundry_demo_feed.py --endpoint $EP --scenarios reply-ok distress
+
+# Optional 3rd beat only if you have ~110s (silence → escalate; strongest "no reply, offline" moment):
+#   python spec/tools/foundry_demo_feed.py --endpoint $EP --voice local --scenarios reply-ok distress no-response
 ```
 
 What each scenario proves on screen:
 
-| Scenario | Reply (voice) | Edge (instant) | Foundry (considered) | The point |
-|---|---|---|---|---|
-| `reply-ok` | "I'm fine" | **L1** reassured | L1 | graded, not spammy |
-| `distress` | "help me" | **L3** escalated | L3 | real distress → immediate action |
-| `no-response` | *(silence)* | **L3** escalated | L3 | acts with no patient reply, offline-safe |
-| `unclear` | "the garden over there" | L2 local alert | L2 | ambiguous intent (LLM path; Ollama optional) |
+| Scenario | Reply (voice) | Edge (instant) | Foundry (considered) | The point | In the cut? |
+|---|---|---|---|---|---|
+| `distress` | "help me" | **L3** escalated | L3 | real distress → immediate action + Foundry value | ✅ hero |
+| `reply-ok` | "I'm fine" | **L1** reassured | L1 | graded, not spammy | ✅ contrast |
+| `no-response` | *(silence)* | **L3** escalated | L3 | acts with no patient reply, offline-safe | ➕ optional (~110s) |
+
+> `unclear` ("the garden over there" → L2 via the on-device LLM path) exists but is **left out of
+> the short cut** — it needs Ollama and doesn't add a new anchor in 90s.
 
 ---
 

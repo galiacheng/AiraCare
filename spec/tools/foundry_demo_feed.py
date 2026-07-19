@@ -70,7 +70,7 @@ SCENARIO_REPLIES: dict[str, str | None] = {
     "distress": "help me",
     "unclear": "the garden over there",
 }
-DEFAULT_ORDER = ["no-response", "reply-ok", "distress", "unclear"]
+DEFAULT_ORDER = ["reply-ok", "distress", "no-response", "unclear"]
 
 
 class VerboseFoundryClient(FoundryA2AClient):
