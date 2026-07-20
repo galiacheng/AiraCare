@@ -191,26 +191,32 @@ python -m airacare_dashboard.server --config config.cosmos.yaml --host 127.0.0.1
 ```
 
 ### 3.2 Terminal 2 — the four patient responses (edge → Foundry A2A), one at a time
-The edge detects the 3 AM wake, **asks "are you okay?" aloud** (local voice), acts on the reply, and
-reports over standard A2A directly to the deployed hosted agent. Run each line, narrate, then refresh
-the dashboard.
+The edge detects the 3 AM wake, **asks "are you okay?" aloud** (local voice), transcribes the reply from
+an **explicit WAV** (`--reply-wav`, on-device Whisper), acts on it, and reports over standard A2A directly
+to the deployed hosted agent. Bundled reply WAVs live in `spec/tools/voice-replies/`. Run each line,
+narrate, then refresh the dashboard.
 
 ```powershell
 cd edge
 $EP = "https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-agent/agents/airacare-care-orchestrator/endpoint/protocols/a2a"
+$WAV = "..\spec\tools\voice-replies"
 
-# 1) No response  -> edge escalates on its own -> L3
+# 1) No response  -> no WAV (silence) -> edge escalates on its own -> L3
 python -m airacare_edge.cli --scenario no-response --cloud foundry --endpoint $EP --voice local --panel
 
 # 2) "I'm fine"   -> graded L1, gentle local reassurance (no family alarm)
-python -m airacare_edge.cli --scenario reply-ok    --cloud foundry --endpoint $EP --voice local --panel
+python -m airacare_edge.cli --scenario reply-ok    --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\reply-ok.wav --panel
 
 # 3) "help me"    -> distress -> escalate -> L3
-python -m airacare_edge.cli --scenario distress    --cloud foundry --endpoint $EP --voice local --panel
+python -m airacare_edge.cli --scenario distress    --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\distress.wav --panel
 
 # 4) unclear ("the garden over there") -> on-device LLM re-interprets the intent
-python -m airacare_edge.cli --scenario unclear     --cloud foundry --endpoint $EP --voice local --panel
+python -m airacare_edge.cli --scenario unclear     --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\unclear.wav --panel
 ```
+
+> `--reply-wav <file>` names the WAV explicitly and forces `voice.input=file`, so on-device Whisper
+> transcribes exactly that reply. `no-response` uses no WAV (silence). Omit `--reply-wav` to fall back to
+> the live microphone.
 
 What to point at per run:
 

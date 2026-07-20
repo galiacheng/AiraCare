@@ -160,7 +160,7 @@ def main() -> None:
         default="console",
         help="console = printed fake voice; local = real TTS + mic/file ASR (needs .[audio])",
     )
-    parser.add_argument("--reply-wav", default=None, help="WAV file to transcribe in voice.input=file mode")
+    parser.add_argument("--reply-wav", default=None, help="explicit WAV file to transcribe (forces voice.input=file)")
     parser.add_argument("--panel", action="store_true", help="render the split-screen edge/cloud demo panel")
     parser.add_argument(
         "--show-briefing",
@@ -173,6 +173,11 @@ def main() -> None:
     args = parser.parse_args()
 
     config = _load_config(args.config, args.cloud, args.endpoint)
+
+    # An explicit --reply-wav only takes effect in voice.input == "file"; force it so the WAV is always used.
+    if args.reply_wav is not None and config.voice.input != "file":
+        config = config.model_copy(update={"voice": config.voice.model_copy(update={"input": "file"})})
+
     run(args.scenario, config, voice_mode=args.voice, reply_wav=args.reply_wav, panel=args.panel, show_briefing=args.show_briefing)
 
 
