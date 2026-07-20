@@ -59,7 +59,7 @@ def _edge_body(result: FlowResult, sensors: list[str], provenance: dict[str, Any
     return "\n".join(lines)
 
 
-def _cloud_body(outcome: ReportOutcome | None) -> str:
+def _cloud_body(outcome: ReportOutcome | None, show_briefing: bool = False) -> str:
     if outcome is None or not outcome.reported or outcome.assessment is None:
         return (
             "[bold red]⚠ OFFLINE[/bold red] — report queued (store-and-forward)\n\n"
@@ -77,6 +77,12 @@ def _cloud_body(outcome: ReportOutcome | None) -> str:
         lines.append("[bold]Cloud sent[/bold]:")
         for action in a.caregiver_notifications:
             lines.append(f"  [{action.channel}] {action.message}")
+    if show_briefing and a.briefing:
+        lines.append("")
+        lines.append("[bold]🗒 Grounded family briefing[/bold]:")
+        for para in a.briefing.splitlines():
+            if para.strip():
+                lines.append(f"  {para.strip()}")
     return "\n".join(lines)
 
 
@@ -88,6 +94,7 @@ def render_split(
     features: list[float] | None = None,
     cloud_mode: str = "stub",
     outcome: ReportOutcome | None = None,
+    show_briefing: bool = False,
 ) -> None:
     """Render the split-screen panel to a rich Console."""
     from rich.panel import Panel
@@ -103,7 +110,7 @@ def render_split(
         border_style="blue",
     )
     cloud = Panel(
-        _cloud_body(outcome),
+        _cloud_body(outcome, show_briefing),
         title=f"☁ FOUNDRY — cloud (async) · {cloud_mode}",
         subtitle="considered assessment · policy",
         border_style="green" if reported else "red",
@@ -132,8 +139,9 @@ def show(
     features: list[float] | None = None,
     cloud_mode: str = "stub",
     outcome: ReportOutcome | None = None,
+    show_briefing: bool = False,
 ) -> None:
     """Convenience: render to a default console (stdout)."""
     from rich.console import Console
 
-    render_split(Console(), result, sensors, provenance, features, cloud_mode, outcome)
+    render_split(Console(), result, sensors, provenance, features, cloud_mode, outcome, show_briefing)

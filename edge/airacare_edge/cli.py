@@ -111,6 +111,7 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
             features=getattr(voice, "last_features", None),
             cloud_mode=config.cloud.mode,
             outcome=outcome,
+            show_briefing=show_briefing,
         )
         return
 
