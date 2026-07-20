@@ -28,6 +28,8 @@ voice:
   confirm_prompt: "{name}, are you okay?"
   reassure_prompt: "It's late. Let's head back to bed — I'll leave a soft light on."
   clarify_prompt: "I didn't catch that. Are you okay?"
+  echo_reply: true               # read the heard reply back aloud (demo transparency)
+  echo_prompt: "I heard you say: {reply}"
 
 # Cloud target (async — the edge acts first, then reports here)
 cloud:

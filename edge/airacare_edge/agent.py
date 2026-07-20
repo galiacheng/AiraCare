@@ -270,7 +270,10 @@ class EdgeAgent:
         attempt = 0
         while True:
             self._voice.say(prompt)
-            intent = self._resolve_intent(self._voice.listen(timeout))
+            transcript = self._voice.listen(timeout)
+            if transcript and self._config.voice.echo_reply:
+                self._voice.say(self._config.voice.echo_prompt.format(reply=transcript))
+            intent = self._resolve_intent(transcript)
             if intent.status != "unclear" or attempt >= max_retries:
                 return intent
             attempt += 1

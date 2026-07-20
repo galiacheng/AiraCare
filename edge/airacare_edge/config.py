@@ -41,6 +41,9 @@ class VoiceConfig(BaseModel):
     confirm_prompt: str = "{name}, are you okay?"
     reassure_prompt: str = "It's late. Let's head back to bed — I'll leave a soft light on."
     clarify_prompt: str = "I didn't catch that. Are you okay?"
+    # Read the heard reply back aloud (demo transparency). echo_prompt supports {reply}.
+    echo_reply: bool = False
+    echo_prompt: str = "I heard you say: {reply}"
 
 
 class CloudConfig(BaseModel):
