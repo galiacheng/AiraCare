@@ -57,7 +57,7 @@ def _load_config(path: str | None, cloud_mode: str, endpoint: str | None) -> Edg
     return config.model_copy(update={"cloud": cloud})
 
 
-def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply_wav: str | None = None, panel: bool = False, show_briefing: bool = False) -> None:
+def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply_wav: str | None = None, panel: bool = False) -> None:
     reply, sensor_factory = SCENARIOS[scenario]
     baseline = BaselineTracker(config.quiet_hours)
     classifier = WanderClassifier(baseline, config.thresholds.correlation_window_seconds)
@@ -131,7 +131,7 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
         print(f"  reason={outcome.assessment.reason}")
         for action in outcome.assessment.caregiver_notifications:
             print(f"  cloud sent: [{action.channel}] {action.message}")
-        if show_briefing and outcome.assessment.briefing:
+        if outcome.assessment.briefing:
             print("\n--- ☁️ Foundry response (hosted model — grounded family briefing) ---")
             for line in outcome.assessment.briefing.splitlines():
                 if line.strip():
@@ -161,18 +161,12 @@ def main() -> None:
     )
     parser.add_argument("--reply-wav", default=None, help="WAV file to transcribe in voice.input=file mode")
     parser.add_argument("--panel", action="store_true", help="render the split-screen edge/cloud demo panel")
-    parser.add_argument(
-        "--show-briefing",
-        action="store_true",
-        help="also print Foundry's grounded family briefing (hosted-model narrative) at the bottom; "
-        "off by default to preserve the original output",
-    )
     parser.add_argument("--endpoint", default=None, help="override the A2A endpoint URL")
     parser.add_argument("--config", default=None, help="path to config.yaml")
     args = parser.parse_args()
 
     config = _load_config(args.config, args.cloud, args.endpoint)
-    run(args.scenario, config, voice_mode=args.voice, reply_wav=args.reply_wav, panel=args.panel, show_briefing=args.show_briefing)
+    run(args.scenario, config, voice_mode=args.voice, reply_wav=args.reply_wav, panel=args.panel)
 
 
 if __name__ == "__main__":
