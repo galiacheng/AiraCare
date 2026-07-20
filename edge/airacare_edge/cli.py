@@ -131,11 +131,6 @@ def run(scenario: str, config: EdgeConfig, *, voice_mode: str = "console", reply
         print(f"  reason={outcome.assessment.reason}")
         for action in outcome.assessment.caregiver_notifications:
             print(f"  cloud sent: [{action.channel}] {action.message}")
-        if outcome.assessment.briefing:
-            print("\n--- ☁️ Foundry response (hosted model — grounded family briefing) ---")
-            for line in outcome.assessment.briefing.splitlines():
-                if line.strip():
-                    print(f"  {line.strip()}")
     elif result.dispatched:
         print("\n--- cloud: OFFLINE — report queued (edge already acted) ---")
     print()

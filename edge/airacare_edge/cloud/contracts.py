@@ -73,10 +73,6 @@ class CloudAssessment(BaseModel):
     caregiver_notifications: list[CloudAction] = Field(default_factory=list)
     policy_version: int = 1
     report_ref: str | None = None
-    # The hosted model's warm, grounded family recap (with knowledge-base citations). Advisory and
-    # observability-only — it never changes ``considered_level``. Populated by the Foundry client;
-    # the in-process/stub gateways leave it ``None``.
-    briefing: str | None = None
 
 
 class EdgePolicyUpdate(BaseModel):

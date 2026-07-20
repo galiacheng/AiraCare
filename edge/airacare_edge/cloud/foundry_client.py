@@ -152,30 +152,13 @@ class FoundryA2AClient:
         if result is None:
             return None
         text = self._await_text(result)
-        if not text:
-            return None
-        assessment = parse_assessment_block(text)
-        if assessment is None:
-            return None
-        # Preserve the hosted model's narrative recap (the value the parsed block alone drops) so the
-        # edge/CLI can surface it. It is everything the agent said *before* the appended block.
-        briefing = self._briefing_text(text)
-        return assessment.model_copy(update={"briefing": briefing}) if briefing else assessment
+        return parse_assessment_block(text) if text else None
 
     def fetch_policy(self, patient_id: str, since_version: int) -> EdgePolicyUpdate | None:
         # Standard-A2A topology has no policy channel; the hosted agent never bumps policy_version.
         return None
 
     # --- helpers -------------------------------------------------------------
-    @staticmethod
-    def _briefing_text(text: str) -> str:
-        """The hosted model's narrative recap: everything before the appended assessment block.
-
-        The middleware appends the ``CONSIDERED ASSESSMENT (JSON)`` block after the model's warm
-        family recap, so the text ahead of that marker is the grounded briefing (with its citations).
-        """
-        return text.split(ASSESSMENT_MARKER, 1)[0].strip()
-
     @staticmethod
     def _message_params(event: DailyLivingEvent) -> dict:
         return {
