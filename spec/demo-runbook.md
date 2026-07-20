@@ -193,8 +193,9 @@ python -m airacare_dashboard.server --config config.cosmos.yaml --host 127.0.0.1
 ### 3.2 Terminal 2 — the four patient responses (edge → Foundry A2A), one at a time
 The edge detects the 3 AM wake, **asks "are you okay?" aloud** (local voice), transcribes the reply from
 an **explicit WAV** (`--reply-wav`, on-device Whisper), acts on it, and reports over standard A2A directly
-to the deployed hosted agent. Bundled reply WAVs live in `spec/tools/voice-replies/`. Run each line,
-narrate, then refresh the dashboard.
+to the deployed hosted agent. Bundled reply WAVs live in `spec/tools/voice-replies/`. `--show-briefing`
+renders Foundry's grounded family briefing inside the cloud panel. Run each line, narrate, then refresh
+the dashboard.
 
 ```powershell
 cd edge
@@ -202,21 +203,22 @@ $EP = "https://cog-jo2jqgwc7xe2m.services.ai.azure.com/api/projects/airacare-age
 $WAV = "..\spec\tools\voice-replies"
 
 # 1) No response  -> no WAV (silence) -> edge escalates on its own -> L3
-python -m airacare_edge.cli --scenario no-response --cloud foundry --endpoint $EP --voice local --panel
+python -m airacare_edge.cli --scenario no-response --cloud foundry --endpoint $EP --voice local --panel --show-briefing
 
 # 2) "I'm fine"   -> graded L1, gentle local reassurance (no family alarm)
-python -m airacare_edge.cli --scenario reply-ok    --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\reply-ok.wav --panel
+python -m airacare_edge.cli --scenario reply-ok    --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\reply-ok.wav --panel --show-briefing
 
 # 3) "help me"    -> distress -> escalate -> L3
-python -m airacare_edge.cli --scenario distress    --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\distress.wav --panel
+python -m airacare_edge.cli --scenario distress    --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\distress.wav --panel --show-briefing
 
 # 4) unclear ("the garden over there") -> on-device LLM re-interprets the intent
-python -m airacare_edge.cli --scenario unclear     --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\unclear.wav --panel
+python -m airacare_edge.cli --scenario unclear     --cloud foundry --endpoint $EP --voice local --reply-wav $WAV\unclear.wav --panel --show-briefing
 ```
 
 > `--reply-wav <file>` names the WAV explicitly and forces `voice.input=file`, so on-device Whisper
 > transcribes exactly that reply. `no-response` uses no WAV (silence). Omit `--reply-wav` to fall back to
-> the live microphone.
+> the live microphone. `--show-briefing` adds Foundry's grounded family briefing (hosted-model narrative
+> with citations) to the cloud panel; drop it for the leaner default output.
 
 What to point at per run:
 
