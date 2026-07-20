@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from airacare_edge.agent import EdgeAgent
@@ -33,7 +33,20 @@ from airacare_edge.sensors.simulator import (
     restless_but_in_bed_events,
 )
 
-NIGHT = datetime(2026, 7, 13, 3, 0, 0, tzinfo=timezone.utc)
+def _demo_night() -> datetime:
+    """The wander incident, stamped at *last night's* 3 AM (UTC) relative to now.
+
+    Making it the freshest event ensures the dashboard's latest-day family briefing always
+    recaps this live run instead of an older seeded day (see spec/demo-runbook.md).
+    """
+    now = datetime.now(timezone.utc)
+    night = now.replace(hour=3, minute=0, second=0, microsecond=0)
+    if night > now:  # before 3 AM UTC — use yesterday so we never file a future event
+        night -= timedelta(days=1)
+    return night
+
+
+NIGHT = _demo_night()
 
 # scenario -> (scripted spoken reply | None, sensor factory)
 SCENARIOS = {
