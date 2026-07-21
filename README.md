@@ -53,6 +53,7 @@ turn fragmented sensor alerts into **graded, explainable actions** caregivers ca
 | [`edge/`](edge/) | Edge agent implementation (Python) — see [`edge/README.md`](edge/README.md) |
 | [`foundry-hosted-agent/`](foundry-hosted-agent/) | Foundry **hosted agent** (`airacare-care-orchestrator`) — deterministic considered assessment + escalation + Cosmos write, deployed on Azure AI Foundry Agent Service; see [`foundry-hosted-agent/README.md`](foundry-hosted-agent/README.md) |
 | [`dashboard/`](dashboard/) | Standalone **care dashboard** (Python) reading the filed events from Cosmos — see [`dashboard/README.md`](dashboard/README.md) |
+| [`FRICTION-LOG.md`](FRICTION-LOG.md) | **Microsoft Foundry friction log** — what worked well, what was confusing, what slowed us down, and missing capabilities (hackathon submission artifact) |
 
 ## Components
 
