@@ -2,6 +2,17 @@
 
 Logo and brand mark for **AiraCare** — Hybrid Edge–Foundry Agent for Alzheimer's Home Care.
 
+## Award certificates
+
+| File | Award |
+|---|---|
+| [`awards/grand-prize-best-overall-agent.pdf`](awards/grand-prize-best-overall-agent.pdf) | Grand Prize — Best Overall Agent |
+| [`awards/best-use-of-foundry-agent.pdf`](awards/best-use-of-foundry-agent.pdf) | Best Use of Foundry Agent |
+
+These are the original Microsoft Office–protected PDFs, approved for public sharing.
+They require a compatible reader and appropriate access; GitHub's PDF preview may not
+display them.
+
 ## Files
 | File | Use |
 |---|---|

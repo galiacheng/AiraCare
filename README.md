@@ -2,6 +2,20 @@
 
 **A guardian that watches on the edge, thinks in the cloud.**
 
+## Awards
+
+AiraCare won **two awards**:
+
+| Award | Certificate |
+|---|---|
+| **Grand Prize — Best Overall Agent** | [View certificate (PDF)](spec/media/awards/grand-prize-best-overall-agent.pdf) |
+| **Best Use of Foundry Agent** | [View certificate (PDF)](spec/media/awards/best-use-of-foundry-agent.pdf) |
+
+The certificates are Microsoft Office–protected PDFs and require a compatible reader
+and appropriate access; GitHub's PDF preview may not display them.
+
+## Overview
+
 ![AiraCare architecture — real-time edge intelligence, Azure AI Foundry reasoning, and a care dashboard, split by an on-device privacy boundary](spec/media/AiraCare_Architecture_original_style_1920x1080_16x9.png)
 
 AiraCare is a **hybrid edge–Foundry AI agent** for in-home Alzheimer's care. A local
